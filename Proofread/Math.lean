@@ -25,13 +25,22 @@ inductive MT where
   | int (lo hi body : MT) (v : Codes)
   | tuple (xs : List MT)
   | interval (a b : MT)
+  /-- An interval with open ends: `(a,b]` is `ival a b true false`. -/
+  | ival (a b : MT) (lopen ropen : Bool)
   | setOf (pat dom : MT) (conds : List MT)
+  /-- `{pat : conds}`: the variables of `pat` that are not yet bound range over
+  the real numbers subject to `conds`. -/
+  | setCond (pat : MT) (conds : List MT)
   | image (elem : MT) (v : Codes) (dom : MT)
   | mapsto (pat body : MT)
   | chain (x : MT) (rest : List (Rel × MT))
   | cases (rows : List (MT × MT))
   | sig (name dom cod : MT)
   | conj (xs : List MT)
+  /-- `φ, equivalently ψ` in a display: `φ`, and `φ ↔ ψ`. -/
+  | equiv (x y : MT)
+  /-- `\text{word}` between the formulas of a display (e.g. `where`). -/
+  | text (w : Codes)
   deriving Repr, Inhabited, Lean.ToExpr
 
 /-- Math tokens after removing typesetting. -/
@@ -44,6 +53,8 @@ inductive MTok where
   | setl | setr
   | row
   | diff
+  /-- `\text{words}` (letters only). -/
+  | text (w : Codes)
   | begin (e : Codes) | finish (e : Codes)
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
@@ -70,7 +81,15 @@ def simplify : Nat → List PTok → Option (List MTok)
     | .finish e => (MTok.finish e :: ·) <$> simplify f ts
     | .ref _ _ => simplify f ts
     | .cmd n =>
-      if wFonts.contains n then
+      if n == w!"text" then
+        match ts with
+        | ⟨.lbrace, _, _⟩ :: rest =>
+          let inner := rest.takeWhile (fun p => p.tok != .rbrace)
+          let word := inner.filterMap (fun p => match p.tok with | .mvar c => some c | _ => none)
+          if word.length != inner.length then none
+          else (MTok.text word :: ·) <$> simplify f (rest.drop (inner.length + 1))
+        | _ => none
+      else if wFonts.contains n then
         match ts with
         | ⟨.lbrace, _, _⟩ :: rest =>
           let letters := rest.takeWhile (fun p => match p.tok with | .mvar _ => true | _ => false)
@@ -82,6 +101,7 @@ def simplify : Nat → List PTok → Option (List MTok)
             else (MTok.id ([92] ++ n ++ [123] ++ word ++ [125]) :: ·) <$> simplify f rest'
           | _ => none
         | _ => none
+      else if n == w!"tfrac" || n == w!"dfrac" then (MTok.cmd w!"frac" :: ·) <$> simplify f ts
       else (MTok.cmd n :: ·) <$> simplify f ts
     | _ => none
 
@@ -113,6 +133,8 @@ def startsFactor : MTok → Bool
 def appHead : MT → Bool
   | .id _ | .sub _ _ | .hat _ | .app _ _ => true
   | .sup _ (.id n) => n == w!"\\top" || n == w!"\\perp"
+  -- the inverse function `f^{-1}`
+  | .sup (.id _) (.neg (.num 1)) => true
   | _ => false
 
 inductive Mode where
@@ -181,18 +203,28 @@ def run : Nat → Mode → List MTok → R
     match ts with
     | .digit d :: rest => run f (.number d) rest
     | .id n :: rest => some (.id n, rest)
-    | .sym 40 :: rest => do
-      let (m, rest') ← run f (.list 41 []) rest
-      match m with
-      | .conj [x] => some (x, rest')
-      | .conj xs => some (.tuple xs, rest')
-      | _ => none
+    | .sym 40 :: rest =>
+      (do
+        let (m, rest') ← run f (.list 41 []) rest
+        match m with
+        | .conj [x] => some (x, rest')
+        | .conj xs => some (.tuple xs, rest')
+        | _ => none) <|>
+      (do
+        -- `(a,b]`
+        let (a, r1) ← run f (.additive false) rest
+        let r2 ← expect (.sym 44) r1
+        let (b, r3) ← run f (.additive false) r2
+        let r4 ← expect (.sym 93) r3
+        some (.ival a b true false, r4))
     | .sym 91 :: rest => do
       let (a, r1) ← run f (.additive false) rest
       let r2 ← expect (.sym 44) r1
       let (b, r3) ← run f (.additive false) r2
-      let r4 ← expect (.sym 93) r3
-      some (.interval a b, r4)
+      match r3 with
+      | .sym 93 :: r4 => some (.interval a b, r4)
+      | .sym 41 :: r4 => some (.ival a b false true, r4)
+      | _ => none
     | .sym 124 :: rest =>
       if bar then none else do
         let (x, r1) ← run f (.additive true) rest
@@ -332,12 +364,18 @@ where
           | .conj cs => some (.setOf head dom cs, r5)
           | _ => none
         else none
-      | .sym 58 :: r2 => do
-        let (v, r3) ← (match r2 with | .id v :: r => some (v, r) | _ => none : Option (Codes × List MTok))
-        let r4 ← expect (.cmd w!"in") r3
-        let (dom, r5) ← run g (.additive false) r4
-        let r6 ← expect .setr r5
-        some (.image head v dom, r6)
+      | .sym 58 :: r2 =>
+        (do
+          let (v, r3) ← (match r2 with | .id v :: r => some (v, r) | _ => none : Option (Codes × List MTok))
+          let r4 ← expect (.cmd w!"in") r3
+          let (dom, r5) ← run g (.additive false) r4
+          let r6 ← expect .setr r5
+          some (.image head v dom, r6)) <|>
+        (do
+          let (conds, r3) ← run g (.list 125 []) r2
+          match conds with
+          | .conj cs => some (.setCond head cs, r3)
+          | _ => none)
       | _ => none
 
 /-- Displays: aligned rows and formula lists separated by `,\qquad`.
@@ -354,7 +392,15 @@ def splitTop : Nat → List MTok → List MTok → Nat → List (List MTok) → 
       let cur' := match cur with | .sym 44 :: c => c | c => c
       if cur'.isEmpty then splitTop f [] ts depth' acc
       else splitTop f [] ts depth' (cur'.reverse :: acc)
-    else if depth == 0 && t == .sym 38 then splitTop f cur ts depth' acc
+    else if depth == 0 && t == .sym 38 then
+      -- `a, & b`: a column of equations; otherwise an alignment point
+      match cur with
+      | .sym 44 :: c => if c.isEmpty then splitTop f [] ts depth' acc else splitTop f [] ts depth' (c.reverse :: acc)
+      | _ => splitTop f cur ts depth' acc
+    else if depth == 0 && (match t with | .text _ => true | _ => false) then
+      let cur' := match cur with | .sym 44 :: c => c | c => c
+      let acc := if cur'.isEmpty then acc else cur'.reverse :: acc
+      splitTop f [] ts depth' ([t] :: acc)
     else splitTop f (t :: cur) ts depth' acc
 
 def stripEnv : List MTok → List MTok
@@ -387,8 +433,18 @@ def parseDisplay (ts : List MTok) : Option MT := do
   let ts := stripEnv ts
   let parts := splitTop (ts.length + 1) [] ts 0 []
   let parts := parts.filter (!·.isEmpty)
+  -- `φ, \text{equivalently} ψ`
+  match parts with
+  | [p, [.text w], q] =>
+    if w == w!"equivalently" then do
+      let a ← parseFormula p
+      let b ← parseFormula q
+      some (.equiv a b)
+    else none
+  | _ => do
   let ms ← parts.mapM fun p =>
     match p with
+    | [.text w] => some (MT.text w)
     | t :: _ => if (relOf t).isSome then parseFormula (.id [] :: p) else parseFormula p
     | [] => none
   let ms ← joinRows ms

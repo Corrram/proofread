@@ -87,6 +87,13 @@ structure Extremum where
   value : MT
   deriving Repr, Inhabited, Lean.ToExpr
 
+/-- A bound variable: its name, type and domain predicate. -/
+structure BindInfo where
+  name : Codes
+  ty : Ty
+  pred : Option Tm
+  deriving Inhabited, DecidableEq, Repr, Lean.ToExpr
+
 structure St where
   /-- The vocabulary of the article. -/
   vocab : Vocab := {}
@@ -114,6 +121,12 @@ structure St where
   proofSteps : List Nat := []
   /-- The most recent subject (for `its`). -/
   subject : Option (Tm × Ty) := none
+  /-- The function of the most recent extremum (for `and the minimum V only by X`). -/
+  lastExtremum : Option MT := none
+  /-- The maps of the most recent sentence about maps (for `the first`, `the second`). -/
+  lastMaps : List (Codes × MT) := []
+  /-- Binders of the current result that later sentences of the result inherit. -/
+  envBinders : List BindInfo := []
   topic : Topic := .none
   deriving Inhabited, Lean.ToExpr
 
@@ -128,6 +141,24 @@ namespace Elab
 
 def tTrue : Tm := .tt
 def interval (lo hi : Tm) (x : Tm) : Tm := .and (.le lo x) (.le x hi)
+
+/-- Membership in an interval with open or closed ends. -/
+def intervalTm (lo hi : Tm) (lopen ropen : Bool) (x : Tm) : Tm :=
+  .and (if lopen then .lt lo x else .le lo x) (if ropen then .lt x hi else .le x hi)
+
+/-- The identifiers of a formula (in order of occurrence). -/
+def mtIds : Nat → MT → List Codes
+  | 0, _ => []
+  | f + 1, m =>
+    match m with
+    | .id n => [n]
+    | .tuple xs | .conj xs | .minm xs | .maxm xs => xs.flatMap (mtIds f)
+    | .add x y | .minus x y | .mul x y | .div x y | .frac x y => mtIds f x ++ mtIds f y
+    | .neg x | .abs x | .hat x => mtIds f x
+    | .sub b i => mtIds f b ++ mtIds f i
+    | .sup b e => mtIds f b ++ mtIds f e
+    | .app h as => mtIds f h ++ as.flatMap (mtIds f)
+    | _ => []
 
 def singular (w : Codes) : Codes :=
   match w.reverse with
@@ -258,6 +289,13 @@ def isZeroOne : MT → Bool
   | .interval (.num 0) (.num 1) => true
   | _ => false
 
+/-- A closed numeric bound: numerals, their negations and quotients. -/
+def constMT : MT → Option Tm
+  | .num n => some (.num n)
+  | .neg x => (constMT x).map .neg
+  | .frac x y | .div x y => do some (.div (← constMT x) (← constMT y))
+  | _ => none
+
 /-- The point-free subject: a term substituted for unapplied functions on its type. -/
 abbrev PF := Option (Tm × Ty)
 
@@ -297,7 +335,18 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
     | .maxm [x, y] => do
       let a ← asReal (← term f sc pf x); let b ← asReal (← term f sc pf y)
       pure (.app (.app (.prim .max) a) b, .real)
-    | .sup b e =>
+    | .sup b e => do
+      -- a family written with a superscript (`\gamma^T`)
+      let fam ← match b, e with
+        | .id k, .id d => if d == w!"\\top" || d == w!"\\perp" then pure none else lookupGlob (k ++ w!"^")
+        | .id _, .num _ => pure none
+        | .id k, _ => lookupGlob (k ++ w!"^")
+        | _, _ => pure none
+      match fam with
+      | some (h, g) => do
+        let a ← term f sc none e
+        applyAll (.glob h) g.ty g.doms [a]
+      | none =>
       match e with
       | .id d =>
         if d == w!"\\top" || d == w!"\\perp" then do
@@ -324,6 +373,17 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
         let a ← term f sc none i
         applyAll (.glob h) g.ty g.doms [a]
       | _ => fail E.unsupported
+    | .app (.sup (.id fn) (.neg (.num 1))) [a] => do
+      -- `f^{-1}(a)`: the element of the domain of `f` that `f` sends to `a`
+      let (i, g) ← liftO (← lookupGlob fn) E.undefined fn
+      match g.ty with
+      | .fn dty cty => do
+        let at_ ← term f sc pf a
+        let a' ← coerce at_.1 at_.2 cty
+        let fy ← applyAll (.glob i) g.ty g.doms [(.loc 0, dty)]
+        let dom := match g.doms.head? with | some (some p) => [Tm.app p (.loc 0)] | _ => []
+        pure (.the dty (conjAll (dom ++ [.eq fy.1 (shift 1 0 a')])), dty)
+      | _ => fail E.type fn
     | .app hd args => do
       let (h, hty, doms) ← head f sc hd
       let xs ← args.mapM (term f sc pf)
@@ -332,6 +392,11 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
       if (lookupLocal sc v).isSome then fail E.shadow v
       let b ← asReal (← term f ((v, .unit) :: sc) (pf.map fun (s, t) => (shift 1 0 s, t)) body)
       pure (.integral b, .real)
+    | .chain (.tuple xs) [(.eq, .tuple ys)] => do
+      -- `(a,b) = (c,d)`: componentwise
+      if xs.length != ys.length then fail E.type
+      let ps ← (xs.zip ys).mapM fun (a, b) => do relTm .eq (← term f sc pf a) (← term f sc pf b)
+      pure (conjAll ps, .prop)
     | .chain x rest => do
       let ts ← (x :: rest.map (·.2)).mapM (term f sc pf)
       let rels := rest.map (·.1)
@@ -351,7 +416,7 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
       | _, _ => do
         let rec pairs : List (Tm × Ty) → List Rel → M (List Tm)
           | a :: b :: more, r :: rs => do
-            let p ← relTm r a b
+            let p ← if r == .eq && isPredTy a.2 && a.2 == b.2 then pure (setEq a.2 a.1 b.1) else relTm r a b
             let ps ← pairs (b :: more) rs
             pure (p :: ps)
           | _, _ => pure []
@@ -362,6 +427,44 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
         if t == .prop then pure p else fail E.type
       pure (conjAll ps, .prop)
     | .setOf pat dom conds => setOf f sc pat dom conds
+    | .setCond pat conds => do
+      -- the variables of the pattern that are not bound range over the reals
+      let st ← get
+      -- (a family `e_b` does not prevent `e` from naming a variable)
+      let fresh := ((mtIds 32 pat).filter fun n =>
+        (lookupLocal sc n).isNone && !(st.globs.any fun g => g.key == n && !g.family)).eraseDups
+      let sc' := (fresh.map fun v => (v, Ty.real)).reverse ++ sc
+      let cs ← conds.mapM fun c => do
+        let (p, t) ← term f sc' none c
+        if t == .prop then pure p else fail E.type
+      let body := conjAll cs
+      let lams (b : Tm) : Tm := fresh.foldr (fun _ acc => Tm.lam .real .tt acc) b
+      let tyOf (n : Nat) : Ty := (List.replicate n Ty.real).foldr Ty.fn .prop
+      match pat with
+      | .id v => if fresh == [v] then pure (lams body, tyOf 1) else fail E.unsupported
+      | .tuple [.id v1, .id v2] =>
+        if fresh == [v1, v2] then pure (lams body, tyOf 2)
+        else fail E.unsupported
+      | .tuple [e1, e2] => do
+        -- the image `{(e₁,e₂) : conds}` as the relation `(p,q) ↦ ∃ vars, conds ∧ p = e₁ ∧ q = e₂`
+        let k := fresh.length
+        let a ← term f sc' none e1
+        let b ← term f sc' none e2
+        let aty := if a.2 == .unit then Ty.unit else Ty.real
+        let bty := if b.2 == .unit then Ty.unit else Ty.real
+        let a' ← coerce a.1 a.2 aty
+        let b' ← coerce b.1 b.2 bty
+        -- under the existentials, `p` and `q` are `loc (k+1)` and `loc k`
+        let inner := Tm.and (shift 2 k body)
+          (.and (.eq (.loc (k + 1)) (shift 2 k a')) (.eq (.loc k) (shift 2 k b')))
+        let exs := fresh.foldr (fun _ acc => Tm.ex .real acc) inner
+        pure (.lam aty .tt (.lam bty .tt exs), .fn aty (.fn bty .prop))
+      | _ => fail E.unsupported
+    | .equiv x y => do
+      let (p, pt) ← term f sc pf x
+      let (q, qt) ← term f sc pf y
+      if pt != .prop || qt != .prop then fail E.type
+      pure (.and p (.iff p q), .prop)
     | .image (.tuple [e1, e2]) v (.id dom) => do
       -- {(e1(v), e2(v)) : v ∈ D} as the relation (r, n) ↦ ∃ v ∈ D, e1 = r ∧ e2 = n
       let (dp, dg) ← liftO (← lookupGlob dom) E.undefined dom
@@ -412,6 +515,15 @@ where
           let l ← asReal (← term g sc none lo)
           let h ← asReal (← term g sc none hi)
           pure (interval l h (← asReal x))
+      | .ival lo hi lopen ropen => do
+        let l ← asReal (← term g sc none lo)
+        let h ← asReal (← term g sc none hi)
+        pure (intervalTm l h lopen ropen (← asReal x))
+      | .tuple [lo, hi] => do
+        -- `x ∈ (a,b)`: an open interval
+        let l ← asReal (← term g sc none lo)
+        let h ← asReal (← term g sc none hi)
+        pure (intervalTm l h true true (← asReal x))
       | .id n => do
         let (i, gl) ← liftO (← lookupGlob n) E.undefined n
         match gl.ty with
@@ -451,6 +563,14 @@ where
       else match d with
         | .interval (.neg (.num a)) (.num b) => pure (.real, some (interval (.neg (.num a)) (.num b) (.loc 0)))
         | .interval (.num a) (.num b) => pure (.real, some (interval (.num a) (.num b) (.loc 0)))
+        | .ival a b lo ro => do
+          let some a' := constMT a | fail E.unsupported
+          let some b' := constMT b | fail E.unsupported
+          pure (.real, some (intervalTm a' b' lo ro (.loc 0)))
+        | .tuple [a, b] => do
+          let some a' := constMT a | fail E.unsupported
+          let some b' := constMT b | fail E.unsupported
+          pure (.real, some (intervalTm a' b' true true (.loc 0)))
         | _ => fail E.unsupported
 
 /-- Elaborate a lambda `pat ↦ body` with the given argument types and result type. -/

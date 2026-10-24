@@ -82,6 +82,7 @@ def optArg : Codes → Codes × Nat
 def wDisplayEnvs : List Codes :=
   [w!"equation", w!"equation*", w!"align", w!"align*", w!"gather", w!"gather*", w!"multline",
    w!"multline*", w!"displaymath"]
+def wListEnvs : List Codes := [w!"enumerate", w!"itemize", w!"description"]
 def wDropText : List Codes :=
   [w!"emph", w!"textit", w!"textbf", w!"textup", w!"noindent", w!"centering", w!"medskip",
    w!"smallskip", w!"bigskip", w!"par", w!"newline", w!"protect", w!"relax", w!"null"]
@@ -164,7 +165,9 @@ def lexAux (macros : Macros) : Nat → Codes → Nat → List Bool → List PTok
               let len := n + env.length + 2
               let isDisplay := wDisplayEnvs.contains env
               if name == w!"begin" then
-                emit (.begin env) (r'.drop 1) len (if isDisplay then false :: st else st)
+                -- the options of a list environment are layout
+                let (r'', k) := if wListEnvs.contains env then optArg (r'.drop 1) else (r'.drop 1, 0)
+                emit (.begin env) r'' (len + k) (if isDisplay then false :: st else st)
               else
                 let st' := if isDisplay then st.drop 1 else st
                 lexAux macros f (r'.drop 1) (pos + len) st' (⟨.finish env, pos, math⟩ :: out)

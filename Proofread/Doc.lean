@@ -34,11 +34,6 @@ structure Doc where
 
 namespace Compile
 
-structure BindInfo where
-  name : Codes
-  ty : Ty
-  pred : Option Tm
-  deriving Inhabited
 
 def intervalPred (lo hi : Tm) : Tm := .lam .real .tt (Elab.interval lo hi (.loc 0))
 
@@ -119,6 +114,14 @@ def domainOf (calculus : Bool) (d : MT) : M (Ty × Option Tm) := do
       let l ← liftO (constTm lo) E.unsupported
       let h ← liftO (constTm hi) E.unsupported
       pure (.real, some (intervalPred l h))
+    | .ival lo hi lopen ropen => do
+      let l ← liftO (Elab.constMT lo) E.unsupported
+      let h ← liftO (Elab.constMT hi) E.unsupported
+      pure (.real, some (.lam .real .tt (Elab.intervalTm l h lopen ropen (.loc 0))))
+    | .tuple [lo, hi] => do
+      let l ← liftO (Elab.constMT lo) E.unsupported
+      let h ← liftO (Elab.constMT hi) E.unsupported
+      pure (.real, some (.lam .real .tt (Elab.intervalTm l h true true (.loc 0))))
     | .id n => do
       let (i, g) ← liftO (← lookupGlob n) E.undefined n
       match g.ty with
@@ -201,16 +204,24 @@ def nounPhrase (np : List Chunk) : M BindInfo := do
   let memberPred ← match member with
     | some (t, p) => if t == ty then pure p.toList else fail E.type
     | none => pure []
-  let all := preds ++ pms.map (·.pred) ++ qms ++ memberPred
+  let all := (preds ++ pms.map (·.pred) ++ qms ++ memberPred).eraseDups
   pure ⟨name, ty, conjPreds ty all⟩
 
-def binderInfos (b : Bind) : M (List BindInfo) :=
-  match b with
+def binderInfos : Bind → M (List BindInfo)
   | .every vs d => do
     let (ty, p) ← domainOf false d
     pure (vs.map fun v => ⟨v, ty, p⟩)
   | .noun np => do pure [← nounPhrase np]
   | .on _ => pure []
+  | .many bs => do
+    let mut out := []
+    for b in bs do
+      match b with
+      | .every vs d => do
+        let (ty, p) ← domainOf false d
+        out := out ++ vs.map fun v => ⟨v, ty, p⟩
+      | _ => fail E.unsupported
+    pure out
 
 def scopeOf (bs : List BindInfo) : Scope := (bs.map fun b => (b.name, b.ty)).reverse
 
@@ -224,6 +235,8 @@ def freeIds : Nat → List Codes → MT → List Codes
     match m with
     | .id n => if bound.contains n then [] else [n]
     | .num _ => []
+    -- the base of `e_b` is a symbol, not a variable
+    | .sub (.id _) i => freeIds f bound i
     | .sub b i => freeIds f bound b ++ freeIds f bound i
     | .sup b e => freeIds f bound b ++ freeIds f bound e
     | .hat x | .neg x | .abs x => freeIds f bound x
@@ -240,6 +253,12 @@ def clauseMaths : Clause → List MT
   | .fact f | .holds f => [f]
   | .deriv d _ c => [d, c]
   | .scoped f _ _ e => f :: e.toList
+  | .everyNP _ b => [b]
+  | .extremumOf _ v f _ a _ => v :: f.toList ++ a.toList
+  | .increasing ms => ms
+  | .ranges _ b => [b]
+  | .increases f a b => [f, a, b]
+  | .sends m f g => [m, f, g]
   | _ => []
 
 /-- The single inequality of a chain, for `with equality only at`. -/
@@ -483,16 +502,75 @@ def defItem (c : SentCtx) (b : BindInfo) (it : DefItem) : M (List Nat × List Na
     pure ([i], [])
   | _ => fail E.unsupported
 
-/-- `define $f:A\to B$ by DISPLAY [and observe that φ for every x∈A]`. -/
-def defBy (c : SentCtx) (sg disp : MT) (labels : List Codes) (observe : Option (MT × List Codes × MT)) :
-    M (List Nat × List Nat) := do
-  match sg, disp with
-  | .sig (.id f) dom cod, .chain (.app (.id f') [.id x]) [(.defeq, rhs)] => do
+/-- One branch of a piecewise definition of `f`, in the scope of its argument `x`:
+the condition under which it applies and its value. A parametric piece also
+defines its parameter family (the `where` part). -/
+def defBranch (f : Codes) (aty cty : Ty) : DefPiece → M (Tm × Tm)
+  -- f(x) := rhs [, x ∈ D]
+  | .formula (.chain (.app (.id f') [.id x]) [(.defeq, rhs)]) => do
     if f != f' then fail E.unsupported
+    let (v, vty) ← term F [(x, aty)] none rhs
+    pure (.tt, ← coerce v vty cty)
+  | .formula (.conj [.chain (.app (.id f') [.id x]) [(.defeq, rhs)], .chain (.id x') [(.mem, d)]]) => do
+    if f != f' || x != x' then fail E.unsupported
+    let (v, vty) ← term F [(x, aty)] none rhs
+    let cnd ← Elab.term.member F [(x, aty)] (.loc 0, aty) d
+    pure (cnd, ← coerce v vty cty)
+  -- f(c) := v for a constant c
+  | .formula (.chain (.app (.id f') [a]) [(.defeq, rhs)]) => do
+    if f != f' then fail E.unsupported
+    let some at_ := Elab.constMT a | fail E.unsupported
+    let (v, vty) ← term F [] none rhs
+    let v ← coerce v vty cty
+    let xr ← coerce (.loc 0) aty .real
+    pure (.eq xr at_, shift 1 0 v)
+  -- on D, parametrically by f(e_b) := g(b), b ∈ P, where e_b := h(b) [, b ∈ P']
+  | .param d (.conj items) => do
+    match items with
+    | .chain (.app (.id f') [.sub (.id e) (.id b)]) [(.defeq, g)] :: .chain (.id b1) [(.mem, pdom)] ::
+        .text wh :: .chain (.sub (.id e') (.id b2)) [(.defeq, h)] :: rest => do
+      if f != f' || e != e' || b != b1 || b != b2 || wh != w!"where" then fail E.unsupported
+      let edom ← match rest with
+        | [] => pure pdom
+        | [.chain (.id b3) [(.mem, d2)]] => if b3 == b then pure d2 else fail E.unsupported
+        | _ => fail E.unsupported
+      -- the family e_b on its domain
+      let (_, epred) ← domainOf true edom
+      let (hv, hty) ← term F [(b, .real)] none h
+      let hv ← coerce hv hty .real
+      let ie ← addGlob ⟨e, .fn .real .real, [epred], true⟩ (.lam .real (holdsAt epred (.loc 0)) hv)
+      -- the value at x: the y with x = e_b and y = g(b) for some b ∈ P
+      let (_, ppred) ← domainOf true pdom
+      let sc : Scope := [(b, .real), (w!"", cty), (w!"", aty)]
+      let (gv, gty) ← term F sc none g
+      let gv ← coerce gv gty cty
+      let eb := Tm.guard (holdsAt epred (.loc 0)) (.app (.glob ie) (.loc 0))
+      let xr ← coerce (.loc 2) aty .real
+      let body := Tm.ex .real (Elab.conjAll [holdsAt ppred (.loc 0), .eq eb xr, .eq (.loc 1) gv])
+      let cnd ← Elab.term.member F [(w!"", aty)] (.loc 0, aty) d
+      pure (cnd, .the cty body)
+    | _ => fail E.unsupported
+  | _ => fail E.unsupported
+
+/-- `define $f:A\to B$ by PIECES [and observe that φ for every x∈A]`: `f` is the
+function on `A` given by its pieces (point values, formulas on subdomains and
+parametric pieces), each applying where its condition holds; it is defined only
+where some piece applies. Its values lie in `B` (a claim). -/
+def defBy (c : SentCtx) (sg : MT) (pieces : List DefPiece) (labels : List Codes)
+    (observe : Option (MT × List Codes × MT)) : M (List Nat × List Nat) := do
+  match sg with
+  | .sig (.id f) dom cod => do
     let (aty, apred) ← domainOf true dom
-    let (body, bty) ← term F [(x, aty)] none rhs
     let (cty, cpred) ← domainOf true cod
-    let body ← coerce body bty cty
+    let start := (← get).globs.length
+    let body ← match pieces with
+      | [.formula (.chain (.app (.id f') [.id x]) [(.defeq, rhs)])] => do
+        if f != f' then fail E.unsupported
+        let (body, bty) ← term F [(x, aty)] none rhs
+        coerce body bty cty
+      | _ => do
+        let bs ← pieces.mapM (defBranch f aty cty)
+        pure (bs.foldr (fun (cnd, v) acc => Tm.cases cnd v acc) (.undef cty))
     let value := Tm.lam aty (holdsAt apred (.loc 0)) body
     let i ← addGlob ⟨f, .fn aty cty, [apred], false⟩ value
     let applied := Tm.guard (holdsAt apred (.loc 0)) (.app (.glob i) (.loc 0))
@@ -507,8 +585,8 @@ def defBy (c : SentCtx) (sg disp : MT) (labels : List Codes) (observe : Option (
         pure [← emit c (wrap bs p) []]
       | none => pure []
     addLabels labels (ids ++ obs) true
-    pure ([i], ids ++ obs)
-  | _, _ => fail E.unsupported
+    pure ((List.range (i + 1 - start)).map (· + start), ids ++ obs)
+  | _ => fail E.unsupported
 
 /-- `For B, the NAME $f_c:A\to B$ reads DISPLAY`. -/
 def defReads (c : SentCtx) (b : BindInfo) (sg disp : MT) (labels : List Codes) : M (List Nat × List Nat) := do
@@ -542,10 +620,32 @@ def denotedBy (name : List Chunk) (sym : MT) : M (List Nat × List Nat) := do
     pure ([i], [])
   | none => fail E.noun (wordsOf name).flatten
 
+/-- `For B, set $X_p\coloneqq e [\in D]$`: a family on the binder's domain, and the
+claims of the rest of the chain. -/
+def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := do
+  match m with
+  | .chain lhs ((.defeq, rhs) :: more) => do
+    let (key, family) ← match lhs with
+      | .sub (.id k) (.id p) => if p == b.name then pure (k, true) else fail E.unsupported
+      | .id k => pure (k, false)
+      | _ => fail E.unsupported
+    let sc : Scope := [(b.name, b.ty)]
+    let (v, vty) ← term F sc none rhs
+    let i ← addGlob ⟨key, .fn b.ty vty, [b.pred], family⟩ (.lam b.ty (holdsAt b.pred (.loc 0)) v)
+    let x : Tm × Ty := (.guard (holdsAt b.pred (.loc 0)) (.app (.glob i) (.loc 0)), vty)
+    let ps ← more.mapM fun (r, y) => do
+      if r == .mem then Elab.term.member F sc x y
+      else do relTm r x (← term F sc none y)
+    let ids ← ps.mapM fun p => emit c (wrap [b] p) []
+    pure ([i], ids)
+  | _ => fail E.unsupported
+
 /-- `For B, let $X_p$ denote NP`. -/
 def letDenote (b : BindInfo) (sym : MT) (np : List Chunk) : M (List Nat × List Nat) := do
   let (key, family) ← match sym with
     | .sub (.id k) (.id p) => if p == b.name then pure (k, true) else fail E.unsupported
+    -- `\gamma^T`: a family written with a superscript
+    | .sup (.id k) (.id p) => if p == b.name then pure (k ++ w!"^", true) else fail E.unsupported
     | .id k => pure (k, false)
     | _ => fail E.unsupported
   let sc : Scope := [(b.name, b.ty)]
@@ -711,7 +811,62 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
     let ay ← conds.mapM (prop sc' (some (.loc 0, sty)))
     let uniq := Tm.all sty (.imp (.app (.glob ni) (.loc 0)) (.imp (conjAll ay) (.eq (.loc 0) (shift 1 0 st))))
     pure (conjAll ([Tm.app (.glob ni) st] ++ atS ++ [uniq]))
+  | .everyNP np body => do
+    let b ← nounPhrase np
+    if b.name.isEmpty then fail E.unsupported
+    let p ← prop ((b.name, b.ty) :: sc) none body
+    pure (wrap [b] p)
+  | .extremumOf isMax value f s at_ rels => do
+    let fm ← match f with
+      | some fm => pure fm
+      | none => match (← get).lastExtremum with
+        | some fm => pure fm
+        | none => fail E.referent
+    let st ← subjectTm sc s
+    let (core, ty, _) ← extremumTm sc isMax fm value st
+    let s' ← coerce st.1 st.2 ty
+    let atP ← match at_ with
+      | some a => do pure [← prop sc (some (s', ty)) a]
+      | none => pure []
+    let extra ← rels.mapM fun r => match r with
+      | .has m => prop sc (some (s', ty)) m
+      | .pred ph o => predicate sc (s', ty) ph o
+    modify fun st' => { st' with
+      extrema := st'.extrema ++ [(c.ctx.env, ⟨isMax, fm, value⟩)], subject := some (s', ty),
+      lastExtremum := some fm }
+    pure (conjAll (core :: atP ++ extra))
+  | .increasing maps => do
+    let mut parts := []
+    let mut infos := []
+    for m in maps do
+      match m with
+      | .mapsto (.id v) body => do
+        let some b := (← get).envBinders.find? (·.name == v) | fail E.free v
+        let (fn, _) ← Elab.lam F sc (.id v) [b.ty] (some .real) body
+        let fxx : Tm := .app (shift 2 0 fn) (.loc 1)
+        let fyy : Tm := .app (shift 2 0 fn) (.loc 0)
+        let ltA : Tm := if b.ty == .unit then .lt (.ofUnit (.loc 1)) (.ofUnit (.loc 0)) else .lt (.loc 1) (.loc 0)
+        parts := parts ++ [Tm.all b.ty (.all b.ty (Tm.mkImp (holdsAt b.pred (.loc 1))
+          (Tm.mkImp (holdsAt b.pred (.loc 0)) (.imp ltA (.lt fxx fyy)))))]
+        infos := infos ++ [(v, body)]
+      | _ => fail E.unsupported
+    modify fun st => { st with lastMaps := infos }
+    pure (conjAll parts)
   | _ => fail E.unsupported
+
+/-- `for $v\in D$, the k-th ranges over $B$`: the image of `D` under the `k`-th map
+of the preceding sentence is `B`. -/
+def rangesTm (sc : Scope) (k : Nat) (bind : BindInfo) (target : MT) : M Tm := do
+  let some (v, body) := (← get).lastMaps[k]? | fail E.referent
+  if v != bind.name then fail E.referent v
+  let (fn, _) ← Elab.lam F sc (.id v) [bind.ty] (some .real) body
+  let fv : Tm := .app (shift 1 0 fn) (.loc 0)
+  let inner ← Elab.term.member F ((v, bind.ty) :: sc) (fv, .real) target
+  let into := Tm.all bind.ty (Tm.mkImp (holdsAt bind.pred (.loc 0)) inner)
+  let inB ← Elab.term.member F ((w!"", .real) :: sc) (.loc 0, .real) target
+  let onto := Tm.all .real (.imp inB (.ex bind.ty (Tm.mkAnd (holdsAt bind.pred (.loc 0))
+    (.eq (.app (shift 2 0 fn) (.loc 0)) (.loc 1)))))
+  pure (.and into onto)
 
 def rhsOf : Clause → Option MT
   | .fact (.chain _ rs) | .scoped (.chain _ rs) _ _ _ => rs.getLast?.map (·.2)
@@ -736,7 +891,21 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
       | [v] => pure (some (⟨v, .real, p⟩ : BindInfo))
       | _ => fail E.free free.flatten
     | _ => pure none
-  let allBs := bs ++ onVar.toList
+  -- variables bound by the opening binders of the current result carry over to
+  -- its later sentences (`For $w\in[0,1]$, … . In particular, … w …`)
+  let st ← get
+  let inResult := match c.ctx.kind with | .result _ => true | _ => false
+  let inherited ← if inResult && !st.envBinders.isEmpty then do
+      let known := (scopeOf (bs ++ onVar.toList)).map (·.1)
+      let clBound := cls.flatMap fun cl => (cl.binds.flatMap fun b => match b with
+        | .every vs _ => vs | _ => []) ++ (match cl.clause with | .scoped _ vs _ _ => vs | _ => [])
+      let free := (cls.flatMap (fun cl => (clauseMaths cl.clause).flatMap (freeIds 64 (known ++ clBound)))).eraseDups
+      let free := free.filter fun n => !(st.globs.any fun g => g.key == n && !g.family)
+      pure (st.envBinders.filter fun b => free.contains b.name)
+    else pure []
+  if inResult && !bs.isEmpty then
+    modify fun st => { st with envBinders := bs ++ st.envBinders.filter fun b => !(bs.any (·.name == b.name)) }
+  let allBs := inherited ++ bs ++ onVar.toList
   let sc := scopeOf allBs
   let rec go : Nat → List CClause → Option MT → M (List Nat)
     | 0, _, _ => pure []
@@ -762,9 +931,27 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
         let body := Tm.ex ty (conjAll ([Tm.app (.glob ni) (.loc 0), cx, sx', uniq] ++ inner))
         let id ← emit c (wrap allBs body) (cl.cites ++ rest.flatMap (·.cites))
         pure [id]
+      | .ranges k target => do
+        -- the binder of the map's variable (of the clause, or of the sentence) restricts
+        -- the map's domain
+        let some (v, _) := (← get).lastMaps[k]? | fail E.referent
+        let cbs := (← cl.binds.mapM binderInfos).flatten
+        let some b := (cbs ++ allBs).find? (·.name == v) | fail E.referent v
+        let outer := (if cbs.isEmpty then allBs else inherited).filter (·.name != v)
+        let p ← rangesTm (scopeOf outer) k b target
+        let id ← emit c (wrap outer p) cl.cites
+        let ids ← go g rest last
+        pure (id :: ids)
       | k => do
-        let p ← clauseTm c sc onVar last k
-        let id ← emit c (wrap allBs p) cl.cites
+        let cbs := (← cl.binds.mapM binderInfos).flatten
+        -- a clause with its own binder is not in the scope of the sentence's opening
+        -- binders; inherited binders bind the variables the clause uses
+        let own := match k with | .scoped _ vs _ _ => vs | _ => []
+        let free := (clauseMaths k).flatMap (freeIds 64 ((scopeOf (bs ++ cbs)).map (·.1) ++ own))
+        let inh := inherited.filter fun b => free.contains b.name
+        let outer := if cbs.isEmpty then inh ++ bs ++ onVar.toList else inh
+        let p ← clauseTm c (scopeOf cbs ++ scopeOf outer) onVar last k
+        let id ← emit c (wrap (outer ++ cbs) p) cl.cites
         let ids ← go g rest (match rhsOf k with | some r => some r | none => last)
         pure (id :: ids)
   go 16 cls none
@@ -781,12 +968,26 @@ def sentence (c : SentCtx) (s : Sent) : M (List Nat × List Nat) := do
   | .defReads b _ sg disp labels => do
     let [bi] ← binderInfos b | fail E.unsupported
     defReads c bi sg disp labels
-  | .defBy sg disp labels obs => defBy c sg disp labels obs
+  | .defBy sg pieces labels obs => defBy c sg pieces labels obs
   | .denotedBy name sym => denotedBy name sym
   | .letDenote b sym np => do
     let [bi] ← binderInfos b | fail E.unsupported
     letDenote bi sym np
   | .weSay sb ph o cond vs d => weSay sb ph o cond vs d
+  | .defSteps b sets sym np whereDef => do
+    let [bi] ← binderInfos b | fail E.unsupported
+    let mut ds := []
+    let mut cs := []
+    for m in sets do
+      let (d', c') ← setDef c bi m
+      ds := ds ++ d'
+      cs := cs ++ c'
+    if let some (sg, disp, ls) := whereDef then
+      let (d', c') ← defReads c bi sg disp ls
+      ds := ds ++ d'
+      cs := cs ++ c'
+    let (d', c') ← letDenote bi sym np
+    pure (ds ++ d', cs ++ c')
   | .claims topic binds cls => do
     let ids ← claimSentence c topic binds cls
     pure ([], ids)
@@ -815,7 +1016,7 @@ def compileOne (envs : List (Codes × Nat)) (c : CState) (s : Sentence) : CState
   -- entering a new environment resets proof-local state
   let st0 := c.st
   let st0 := if st0.proofEnv != s.ctx.env then
-      { st0 with proofEnv := s.ctx.env, proofCites := [], proofSteps := [], topic := .none }
+      { st0 with proofEnv := s.ctx.env, proofCites := [], proofSteps := [], topic := .none, envBinders := [] }
     else st0
   let ps := match s.ctx.kind with
     | .proof => if c.proofs.any (·.env == s.ctx.env) then c.proofs

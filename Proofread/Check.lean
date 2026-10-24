@@ -88,7 +88,10 @@ def diagnostics (V : Vocab) (rel : String) (lines : List (List Nat)) (d : Doc)
     | .failed e => out := out ++ [s!"{rel}:{l}:{c}: warning: sentence not compiled ({errMessage e}); it asserts nothing checked"]
     | .prose =>
       if prose && ctx.kind != .text then
-        out := out ++ [s!"{rel}:{l}:{c}: info: {kindString ctx.kind} sentence without a mathematical reading"]
+        let (_, a, b) := d.sentences[s]!
+        let text := Codes.toString ((joinLines lines).drop a |>.take (min 90 (b - a)))
+        let text := text.replace "\n" " "
+        out := out ++ [s!"{rel}:{l}:{c}: info: {kindString ctx.kind} sentence without a mathematical reading: {text}"]
     | .compiled ds ks =>
       if claims then
         for i in ds do

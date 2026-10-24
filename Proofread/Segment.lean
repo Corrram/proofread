@@ -137,7 +137,7 @@ def go : Nat → List PTok → St → St
           let closer := ts[i]?.getD default
           let rest := ts.drop (i + 1)
           let last := body.reverse.find? (fun p => match p.tok with
-            | .finish _ | .rbrace | .csym 92 => false | _ => true)
+            | .finish _ | .rbrace | .csym 92 | .ref .label _ => false | _ => true)
           let ends : Bool := match last with | some p => p.tok == .msym 46 | none => false
           let s := { s with cur := closer :: (body.reverse ++ (t :: s.cur)) }
           if ends then go f rest (flush s) else go f rest s
