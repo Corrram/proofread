@@ -111,7 +111,7 @@
       "configFile": "lakefile.toml"
     }
   ],
-  "name": "\u00ablean-mirror\u00bb",
+  "name": "proofread",
   "lakeDir": ".lake",
   "fixedToolchain": false
 }

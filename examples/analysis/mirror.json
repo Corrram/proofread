@@ -1,9 +1,0 @@
-{
-  "module": "LeanMirror.Examples.AnalysisPresentation",
-  "exporter": "scripts/ExportAnalysis.lean",
-  "source": "source.json",
-  "output": "build/analysis",
-  "title": "Sequences and limits",
-  "executable": "LeanMirror/Examples/Analysis.lean",
-  "license": "CC-BY-SA-4.0"
-}

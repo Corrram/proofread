@@ -1,8 +1,8 @@
-name = "lean-mirror"
-version = "0.1.0"
-description = "Precise mathematical statements, readable LaTeX, and Lean correspondence certificates"
+name = "proofread"
+version = "0.2.0"
+description = "Mathematical articles in LaTeX, compiled and checked by Lean"
 license = "Apache-2.0"
-defaultTargets = ["LeanMirror"]
+defaultTargets = ["Proofread"]
 
 [leanOptions]
 autoImplicit = false
@@ -16,5 +16,9 @@ git = "https://github.com/leanprover-community/mathlib4"
 rev = "5ed2965256430c3649e86755f9576b54eca72435"
 
 [[lean_lib]]
-name = "LeanMirror"
-globs = ["LeanMirror.*"]
+name = "Proofread"
+globs = ["Proofread.+"]
+
+[[lean_exe]]
+name = "proofread"
+root = "ProofreadCli"
