@@ -78,6 +78,7 @@ structure St where
   lastResult : Codes := []
   sec : Nat := 0
   skipDepth : Nat := 0
+  deriving Inhabited, Lean.ToExpr
 
 def flush (s : St) : St :=
   match s.cur with
@@ -102,8 +103,8 @@ def proofTarget : List PTok → Codes
     | _ => proofTarget ts
 
 def go : Nat → List PTok → St → St
-  | 0, _, s => flush s
-  | _ + 1, [], s => flush s
+  | 0, _, s => s
+  | _ + 1, [], s => s
   | f + 1, t :: ts, s =>
     if s.skipDepth > 0 then
       match t.tok with
@@ -162,8 +163,16 @@ def go : Nat → List PTok → St → St
 
 end Segment
 
-/-- The sentences of a document body (the tokens after `\begin{document}`). -/
-def sentences (body : List PTok) : List Sentence :=
-  (Segment.go (body.length + 1) body {}).out.reverse
+/-- Segment the tokens of one paragraph block (at offset `base`), continuing the
+state of the previous blocks: the sentences completed in the block, and the state
+for the next block (a sentence may continue into it). -/
+def segBlock (base : Nat) (toks : List PTok) (s : Segment.St) : List Sentence × Segment.St :=
+  let toks := toks.map (PTok.shift base)
+  let s' := Segment.go (toks.length + 1) toks { s with out := [] }
+  (s'.out.reverse, { s' with out := [] })
+
+/-- The sentence left unfinished at the end of the document. -/
+def segFinish (s : Segment.St) : List Sentence :=
+  (Segment.flush { s with out := [] }).out.reverse
 
 end Proofread

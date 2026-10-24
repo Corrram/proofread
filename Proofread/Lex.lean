@@ -242,74 +242,53 @@ def lex (macros : Macros) (input : Codes) (offset : Nat := 0) : Option (List PTo
   | some (ts, []) => some ts
   | _ => none
 
-/-! ## Packed source
+/-! ## Source and paragraph blocks
 
-The source is a list of lines, each stored as its length and one natural number
-in base `2^21` (code points, least significant first). Kernel arithmetic on
-literals unpacks a line quickly; blank lines separate paragraph blocks, which are
-lexed one at a time. -/
+The source is the list of its lines, each a list of code points. Blank lines
+separate paragraph blocks. Each block is lexed on its own, with positions
+relative to the block's start, so that the lexing of a block depends only on
+its text, the preamble macros and the math mode it starts in. -/
 
-abbrev Packed := List (Nat × Nat)
+abbrev Source := List Codes
 
-def unpackLine : Nat → Nat → Codes
-  | 0, _ => []
-  | k + 1, n => n % 2097152 :: unpackLine k (n / 2097152)
-
-def packLine (l : Codes) : Nat := l.foldr (fun c acc => c + 2097152 * acc) 0
-
-def Packed.join (ls : Packed) : Codes := (ls.map fun (len, n) => unpackLine len n ++ [10]).flatten
+/-- The text of lines, each followed by a newline. -/
+def joinLines (ls : List Codes) : Codes := (ls.map fun l => l ++ [10]).flatten
 
 /-- Offset just after the given lines (each followed by a newline). -/
-def Packed.offset (ls : Packed) : Nat := ls.foldl (fun a (len, _) => a + len + 1) 0
+def linesOffset (ls : List Codes) : Nat := ls.foldl (fun a l => a + l.length + 1) 0
 
-def Packed.blank (len n : Nat) : Bool := (unpackLine len n).all Lex.isSpace
+def blankLine (l : Codes) : Bool := l.all Lex.isSpace
 
-/-- Group lines into paragraph blocks (start offset, lines); blank lines separate blocks. -/
-def blocksOf : Packed → Nat → Option (Nat × Packed) → List (Nat × Packed) → List (Nat × Packed)
+/-- Group lines into paragraph blocks (start offset, lines); blank lines separate
+blocks. -/
+def blocksOf : List Codes → Nat → Option (Nat × List Codes) → List (Nat × List Codes) → List (Nat × List Codes)
   | [], _, cur, acc => (cur.toList ++ acc).reverse
-  | (len, n) :: ls, pos, cur, acc =>
-    if Packed.blank len n then blocksOf ls (pos + len + 1) none (cur.toList ++ acc)
+  | l :: ls, pos, cur, acc =>
+    if blankLine l then blocksOf ls (pos + l.length + 1) none (cur.toList ++ acc)
     else match cur with
-      | none => blocksOf ls (pos + len + 1) (some (pos, [(len, n)])) acc
-      | some (p, c) => blocksOf ls (pos + len + 1) (some (p, c ++ [(len, n)])) acc
+      | none => blocksOf ls (pos + l.length + 1) (some (pos, [l])) acc
+      | some (p, c) => blocksOf ls (pos + l.length + 1) (some (p, c ++ [l])) acc
 
-/-- Lex one paragraph block starting at `pos`, continuing the mode stack. -/
-def lexBlock (macros : Macros) (block : Codes) (pos : Nat) (st : List Bool) :
-    Option (List PTok × List Bool) :=
-  Lex.lexAux macros (4 * block.length + 16) block pos st []
+/-- Lex one paragraph block (positions relative to its start), continuing the
+math-mode stack. -/
+def lexBlock (macros : Macros) (block : Codes) (st : List Bool) : Option (List PTok × List Bool) :=
+  Lex.lexAux macros (4 * block.length + 16) block 0 st []
 
-/-- Lex paragraph blocks in order; blocks are separated by paragraph breaks. -/
-def lexBlocks (macros : Macros) : List (Nat × Packed) → List Bool → Option (List PTok × List Bool)
-  | [], st => some ([], st)
-  | (pos, b) :: bs, st => do
-    let (t, st') ← lexBlock macros (Packed.join b) pos st
-    let (ts, st'') ← lexBlocks macros bs st'
-    let brk : List PTok := if st'.isEmpty then [⟨.par, pos, false⟩] else []
-    some (t ++ brk ++ ts, st'')
+/-- The paragraph break after a block (none inside an open formula). -/
+def blockBreak (st : List Bool) : List PTok := if st.isEmpty then [⟨.par, 0, false⟩] else []
 
-theorem lexBlocks_append (macros : Macros) (l₁ l₂ : List (Nat × Packed)) (st : List Bool)
-    (t₁ t₂ : List PTok) (st₁ st₂ : List Bool)
-    (h₁ : lexBlocks macros l₁ st = some (t₁, st₁)) (h₂ : lexBlocks macros l₂ st₁ = some (t₂, st₂)) :
-    lexBlocks macros (l₁ ++ l₂) st = some (t₁ ++ t₂, st₂) := by
-  induction l₁ generalizing st t₁ with
-  | nil =>
-    simp only [lexBlocks, Option.some.injEq, Prod.mk.injEq] at h₁
-    obtain ⟨rfl, rfl⟩ := h₁
-    simpa using h₂
-  | cons hd tl ih =>
-    obtain ⟨pos, b⟩ := hd
-    simp only [lexBlocks, List.cons_append] at h₁ ⊢
-    cases hb : lexBlock macros (Packed.join b) pos st with
-    | none => simp [hb] at h₁
-    | some r =>
-      obtain ⟨t, st'⟩ := r
-      cases ht : lexBlocks macros tl st' with
-      | none => simp [hb, ht] at h₁
-      | some r' =>
-        obtain ⟨ts, st''⟩ := r'
-        simp only [hb, ht, Option.bind_eq_bind, Option.bind_some, Option.some.injEq,
-          Prod.mk.injEq] at h₁
-        obtain ⟨rfl, rfl⟩ := h₁
-        simp [ih st' ts ht, List.append_assoc]
+/-- The key of a block's lexing: the macros, the math-mode stack it starts in and
+its text determine its tokens. Equal keys name the same cached certificate (the
+kernel still compares the literals, so a collision cannot cause harm). -/
+def lexKey (macros : Macros) (st : List Bool) (block : Codes) : String :=
+  let enc (c : Codes) : String := Codes.toString c
+  let ms := String.intercalate "\u0001" (macros.map fun (n, b) => enc n ++ "\u0002" ++ enc b)
+  let s := ms ++ "\u0003" ++ String.ofList (st.map fun b => if b then '1' else '0') ++ "\u0003" ++ enc block
+  let h := s.toUTF8.foldl (fun (h : UInt64) b => (h ^^^ b.toUInt64) * 0x100000001b3) 0xcbf29ce484222325
+  let hex := String.ofList (Nat.toDigits 16 h.toNat)
+  String.ofList (List.replicate (16 - hex.length) '0') ++ hex
+
+/-- Shift token positions by a block's start offset. -/
+def PTok.shift (base : Nat) (t : PTok) : PTok := { t with pos := t.pos + base }
 
 end Proofread

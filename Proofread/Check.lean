@@ -18,7 +18,6 @@ def readLines (path : System.FilePath) : IO (List (List Nat)) := do
   let lines := if lines.getLast? == some "" then lines.dropLast else lines
   pure (lines.map fun l => l.toList.map Char.toNat)
 
-def packedOf (lines : List (List Nat)) : Packed := lines.map fun l => (l.length, packLine l)
 
 def errMessage (e : Err) : String :=
   let d := Codes.toString e.detail
@@ -104,7 +103,7 @@ def diagnostics (V : Vocab) (rel : String) (lines : List (List Nat)) (d : Doc)
 the number of sentences that failed to compile. -/
 def checkArticle (V : Vocab) (path : System.FilePath) (prose claims : Bool := false) : IO Nat := do
   let lines ← readLines path
-  match compileArticle V (packedOf lines) with
+  match compileArticle V lines with
   | none =>
     IO.eprintln s!"{path}: error: the article could not be read (no \\begin\{document}, or unbalanced math)"
     pure 1

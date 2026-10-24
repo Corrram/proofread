@@ -12,9 +12,11 @@ namespace `J`: `J.definedI : Foo.wellDefinedI` for every definition and
   Mathlib's libraries, Proofread, the compiled article and helpers that are
   themselves audited, so a proof sentence cannot be justified by a result the
   sentence does not cite;
-* has the kernel check `Foo.certificate : Certificate Foo.doc Foo.G …` and
+* has the kernel check `Foo.certificate : Certificate Foo.model Foo.doc Foo.G …` and
   derives `Foo.verifiedK : Foo.meaningfulK ∧ Foo.claimK` from it;
-* writes `<article>.proofread.json`, the per-sentence status for readers and editors. -/
+* writes `<article>.proofread.json`, the per-sentence status for readers and
+  editors, and `<article>.proofread.tex`, the status of every labelled result for
+  the margin marks of `proofread.sty`. -/
 namespace Proofread
 open Lean Elab Command Meta
 
@@ -41,12 +43,12 @@ partial def auditConst (env : Environment) (permitted isLocal : Name → Bool) (
   | none => pure ()
 
 /-- `(∀ j ∈ premisesOf d k, holds d G j) → holds d G k`, as stated in `Certificate`. -/
-def stepType (docE gE : Expr) (k : Nat) : MetaM Expr := do
+def stepType (mE docE gE : Expr) (k : Nat) : MetaM Expr := do
   let pre := mkApp2 (Lean.mkConst ``Doc.premisesOf) docE (mkNatLit k)
   let hyp ← withLocalDeclD `j (Lean.mkConst ``Nat) fun j => do
-    let body ← mkArrow (← mkAppM ``Membership.mem #[pre, j]) (mkApp3 (Lean.mkConst ``Doc.holds) docE gE j)
+    let body ← mkArrow (← mkAppM ``Membership.mem #[pre, j]) (mkApp4 (Lean.mkConst ``Doc.holds) mE docE gE j)
     mkForallFVars #[j] body
-  mkArrow hyp (mkApp3 (Lean.mkConst ``Doc.holds) docE gE (mkNatLit k))
+  mkArrow hyp (mkApp4 (Lean.mkConst ``Doc.holds) mE docE gE (mkNatLit k))
 
 syntax (name := proofreadCertify) "#proofread_certify " ident str " using " ident : command
 
@@ -55,7 +57,7 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
   let some rel := stx[2].isStrLit? | throwUnsupportedSyntax
   let jn := stx[4].getId
   checkFresh ns rel
-  let d ← nativeDoc rel
+  let d ← nativeDoc ns rel
   let env ← getEnv
   let nm (s : String) : Name := Name.mkSimple s
   -- justifications
@@ -98,7 +100,14 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
         changed := true
   let verified := (List.range d.claims.length).filter fun k => justified[k]!.isSome
   -- audit of claims derived in the text
-  let articleMods := [moduleOf env (ns ++ `doc), moduleOf env (ns ++ `claim0)].filterMap id
+  -- the compiled article, and the modules of its vocabulary and model
+  let vocabMod := match env.find? (ns ++ `vocab) with
+    | some (.defnInfo v) => v.value.getAppFn.constName?.bind (moduleOf env)
+    | _ => none
+  let modelMod := match env.find? (ns ++ `model) with
+    | some (.defnInfo v) => v.value.getAppFn.constName?.bind (moduleOf env)
+    | _ => none
+  let articleMods := [moduleOf env (ns ++ `doc), moduleOf env (ns ++ `claim0), vocabMod, modelMod].filterMap id
   let localMods := (justified.toList.filterMap id ++ defined.toList).filterMap (moduleOf env)
   let permitted (m : Name) : Bool := articleMods.contains m || permittedRoots.any (·.isPrefixOf m)
   let isLocal (m : Name) : Bool := localMods.contains m
@@ -125,6 +134,7 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
       value := listNat ranks, hints := .abbrev, safety := .safe }
   let docE := Lean.mkConst (ns ++ `doc)
   let gE := Lean.mkConst (ns ++ `G)
+  let mE := Lean.mkConst (ns ++ `model)
   let verE := Lean.mkConst (ns ++ `verifiedClaims)
   let rankE := Lean.mkConst (ns ++ `claimRanks)
   kernelRefl (ns ++ `rankedOk) (Lean.mkConst ``Bool) (mkApp3 (Lean.mkConst ``Doc.ranked) docE verE rankE)
@@ -133,20 +143,20 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
     ps.foldr (fun (ty, pf) (accTy, accPf) =>
       (mkAnd ty accTy, mkApp4 (Lean.mkConst ``And.intro) ty accTy pf accPf))
       (Lean.mkConst ``True, Lean.mkConst ``True.intro) |>.2
-  let welldefTy (i : Nat) : Expr := mkApp3 (Lean.mkConst ``Doc.welldef) docE gE (mkNatLit i)
-  let holdsTy (k : Nat) : Expr := mkApp3 (Lean.mkConst ``Doc.holds) docE gE (mkNatLit k)
+  let welldefTy (i : Nat) : Expr := mkApp4 (Lean.mkConst ``Doc.welldef) mE docE gE (mkNatLit i)
+  let holdsTy (k : Nat) : Expr := mkApp4 (Lean.mkConst ``Doc.holds) mE docE gE (mkNatLit k)
   let defsPfs := (List.range d.values.length).map fun i =>
     (welldefTy i, mkApp4 (Lean.mkConst ``Eq.mpr [Level.zero]) (welldefTy i)
       (Lean.mkConst (ns ++ nm s!"wellDefined{i}")) (Lean.mkConst (ns ++ nm s!"welldef{i}"))
       (Lean.mkConst defined[i]!))
   let mut stepPfs : List (Expr × Expr) := []
   for k in verified do
-    let ty ← liftTermElabM <| stepType docE gE k
+    let ty ← liftTermElabM <| stepType mE docE gE k
     stepPfs := stepPfs ++ [(ty, mkApp (Lean.mkConst (ns ++ nm s!"obligation{k}_sound"))
       (Lean.mkConst justified[k]!.get!))]
-  let certTy := mkApp4 (Lean.mkConst ``Certificate) docE gE verE rankE
+  let certTy := mkApp5 (Lean.mkConst ``Certificate) mE docE gE verE rankE
   let certPf := mkAppN (Lean.mkConst ``Certificate.ofLists)
-    #[docE, gE, verE, rankE, mkNatLit d.values.length, Lean.mkConst (ns ++ `definitionCount),
+    #[mE, docE, gE, verE, rankE, mkNatLit d.values.length, Lean.mkConst (ns ++ `definitionCount),
       Lean.mkConst (ns ++ `env), conj defsPfs, Lean.mkConst (ns ++ `rankedOk), conj stepPfs]
   liftCoreM <| addDecl <| Declaration.thmDecl
     { name := ns ++ `certificate, levelParams := [], type := certTy, value := certPf }
@@ -158,7 +168,7 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
       let rfl ← mkEqRefl (Lean.mkConst ``Bool.true)
       mkAppOptM ``List.mem_of_elem_eq_true #[none, none, none, mkNatLit k, verE,
         some (← mkExpectedTypeHint rfl (← mkEq e (Lean.mkConst ``Bool.true)))]
-    let sound := mkAppN (Lean.mkConst ``Certificate.sound) #[docE, gE, verE, rankE,
+    let sound := mkAppN (Lean.mkConst ``Certificate.sound) #[mE, docE, gE, verE, rankE,
       Lean.mkConst (ns ++ `certificate), mkNatLit k, mem]
     let pf := mkApp4 (Lean.mkConst ``Eq.mp [Level.zero]) (holdsTy k) readable
       (Lean.mkConst (ns ++ nm s!"holds{k}")) sound

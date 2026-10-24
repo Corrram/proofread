@@ -4,29 +4,41 @@ import Proofread.Tactic
 
 /-! # Readable Lean statements for compiled definitions and claims
 
-`#proofread_semantics Foo` names every article definition as a Lean constant whose
-value is its denotation written as ordinary Lean, and states every claim as a
-proposition `Foo.claimK`. Each is tied to the compiled document by a theorem
-proved with `Eq.refl`, so the kernel checks that the readable form *is* the
-semantics of the article's text: `Foo.env` (the definitions), `Foo.holdsK`
-(claim `K` holds iff `Foo.claimK`), `Foo.welldefI` (definition `I` is well
-defined iff `Foo.wellDefinedI`). The translator is untrusted. -/
+`#proofread_semantics Foo "article.tex" with M` names every article definition as
+a Lean constant whose value is its denotation written as ordinary Lean, and
+states every claim as a proposition `Foo.claimK`. `M` is the model of the
+vocabulary the article was compiled with (default `Proofread.Model.empty`).
+Each is tied to the compiled document by a theorem proved with `Eq.refl`, so the
+kernel checks that the readable form *is* the semantics of the article's text:
+`Foo.env` (the definitions), `Foo.holdsK` (claim `K` holds iff `Foo.claimK`),
+`Foo.welldefI` (definition `I` is well defined iff `Foo.wellDefinedI`). The
+translator is untrusted. -/
 namespace Proofread
 open Lean Elab Term Meta Command
 
-/-- The Lean type of a term type: `ℝ`, `I`, `Prop` and function types. -/
-def tyExpr : Ty → MetaM Expr
+/-- The Lean type of a term type: `ℝ`, `I`, `Prop`, function types, and the base
+types of the model `M`. -/
+partial def tyExpr (M : Expr) : Ty → MetaM Expr
   | .real => pure (Lean.mkConst ``Real)
   | .unit => pure (mkApp2 (Lean.mkConst ``Set.Elem [Level.zero]) (Lean.mkConst ``Real) (Lean.mkConst ``unitInterval))
   | .prop => pure (mkSort Level.zero)
-  | .fn a b => do mkArrow (← tyExpr a) (← tyExpr b)
+  | .fn a b => do mkArrow (← tyExpr M a) (← tyExpr M b)
+  | .base k => whnf (mkApp (mkApp (Lean.mkConst ``Model.base) M) (mkNatLit k))
+
+/-- The Lean values of the model's constants, read from its definition. -/
+partial def modelConsts (M : Expr) : MetaM (Array Expr) := do
+  let rec go (e : Expr) (acc : Array Expr) (fuel : Nat) : MetaM (Array Expr) := do
+    if fuel == 0 then return acc
+    let e ← whnf e
+    if e.isAppOfArity ``List.cons 3 then
+      let hd ← whnf (e.getArg! 1)
+      let v := if hd.isAppOfArity ``Sigma.mk 4 then hd.getArg! 3 else mkProj ``Sigma 1 hd
+      go (e.getArg! 2) (acc.push v.headBeta) (fuel - 1)
+    else return acc
+  go (mkApp (Lean.mkConst ``Model.consts) M) #[] 100000
 
 def primConst : Prim → Option Name
   | .leb => some ``Prelude.leb
-  | .distFn2 => some ``Prelude.distFn2
-  | .dfUniformMarginals => some ``Prelude.dfUniformMarginals
-  | .probMeasure2 => some ``Prelude.probMeasure2
-  | .measUniformMarginals => some ``Prelude.measUniformMarginals
   | .measurableSet1 => some ``Prelude.measurableSet1
   | .measurableSet2 => some ``Prelude.measurableSet2
   | .integrable => some ``Prelude.integrable
@@ -38,137 +50,167 @@ def realLit (n : Nat) : TermElabM Expr := do
   Term.synthesizeSyntheticMVarsNoPostponing
   instantiateMVars e
 
+/-- The translation context: the model, its constants, and the article's definitions. -/
+structure RCtx where
+  model : Expr
+  consts : Array Expr
+  globs : Array Expr
+
 /-- Translate a core term to a readable Lean expression (verified afterwards by `rfl`). -/
-partial def readable (globs : Array Expr) (ls : List Expr) : Tm → TermElabM Expr
-  | .glob i => pure (globs.getD i (Lean.mkConst `sorryAx))
+partial def readable (R : RCtx) (ls : List Expr) : Tm → TermElabM Expr
+  | .glob i => pure (R.globs.getD i (Lean.mkConst `sorryAx))
   | .loc i => pure (ls.getD i (Lean.mkConst `sorryAx))
+  | .const i => pure (R.consts.getD i (Lean.mkConst `sorryAx))
   | .prim p => do
     match primConst p with
     | some n => pure (Lean.mkConst n)
-    | none => Meta.reduce (mkApp (Lean.mkConst ``Prim.denote) (toExpr p)) (explicitOnly := false)
-  | .app (.app (.prim .rpow) x) y => do mkAppM ``HPow.hPow #[← readable globs ls x, ← readable globs ls y]
-  | .app (.app (.prim .min) x) y => do mkAppM ``Min.min #[← readable globs ls x, ← readable globs ls y]
-  | .app (.app (.prim .max) x) y => do mkAppM ``Max.max #[← readable globs ls x, ← readable globs ls y]
-  | .app (.prim .borel) x => do mkAppM ``Measurable #[← readable globs ls x]
+    | none => Meta.reduce (mkApp2 (Lean.mkConst ``Prim.denote) (mkApp (Lean.mkConst ``Model.base) R.model) (toExpr p))
+        (explicitOnly := false)
+  | .app (.app (.prim .rpow) x) y => do mkAppM ``HPow.hPow #[← readable R ls x, ← readable R ls y]
+  | .app (.app (.prim .min) x) y => do mkAppM ``Min.min #[← readable R ls x, ← readable R ls y]
+  | .app (.app (.prim .max) x) y => do mkAppM ``Max.max #[← readable R ls x, ← readable R ls y]
+  | .app (.prim .borel) x => do mkAppM ``Measurable #[← readable R ls x]
   | .app (.prim p) x => do
     match primConst p with
-    | some n => pure (mkApp (Lean.mkConst n) (← readable globs ls x))
-    | none => pure (mkApp (← readable globs ls (.prim p)) (← readable globs ls x))
+    | some n => pure (mkApp (Lean.mkConst n) (← readable R ls x))
+    | none => pure (mkApp (← readable R ls (.prim p)) (← readable R ls x))
   | .app f x => do
-    let f' ← readable globs ls f
-    let x' ← readable globs ls x
+    let f' ← readable R ls f
+    let x' ← readable R ls x
     pure (mkApp f' x').headBeta
   | .lam t _ b => do
-    withLocalDeclD `x (← tyExpr t) fun v => do
-      mkLambdaFVars #[v] (← readable globs (v :: ls) b)
+    withLocalDeclD `x (← tyExpr R.model t) fun v => do
+      mkLambdaFVars #[v] (← readable R (v :: ls) b)
   | .num n => realLit n
-  | .ofUnit x => do mkAppM ``Subtype.val #[← readable globs ls x]
+  | .ofUnit x => do mkAppM ``Subtype.val #[← readable R ls x]
   | .toUnit x => do
-    let x' ← readable globs ls x
+    let x' ← readable R ls x
     let stx ← `(Set.projIcc (0 : ℝ) 1 zero_le_one $(← exprToSyntax x'))
     let e ← Term.elabTerm stx none
     Term.synthesizeSyntheticMVarsNoPostponing
     instantiateMVars e
-  | .add x y => do mkAppM ``HAdd.hAdd #[← readable globs ls x, ← readable globs ls y]
-  | .sub x y => do mkAppM ``HSub.hSub #[← readable globs ls x, ← readable globs ls y]
-  | .mul x y => do mkAppM ``HMul.hMul #[← readable globs ls x, ← readable globs ls y]
-  | .div x y => do mkAppM ``HDiv.hDiv #[← readable globs ls x, ← readable globs ls y]
-  | .neg x => do mkAppM ``Neg.neg #[← readable globs ls x]
-  | .abs x => do mkAppM ``abs #[← readable globs ls x]
-  | .powNat x n => do mkAppM ``HPow.hPow #[← readable globs ls x, mkNatLit n]
+  | .add x y => do mkAppM ``HAdd.hAdd #[← readable R ls x, ← readable R ls y]
+  | .sub x y => do mkAppM ``HSub.hSub #[← readable R ls x, ← readable R ls y]
+  | .mul x y => do mkAppM ``HMul.hMul #[← readable R ls x, ← readable R ls y]
+  | .div x y => do mkAppM ``HDiv.hDiv #[← readable R ls x, ← readable R ls y]
+  | .neg x => do mkAppM ``Neg.neg #[← readable R ls x]
+  | .abs x => do mkAppM ``abs #[← readable R ls x]
+  | .powNat x n => do mkAppM ``HPow.hPow #[← readable R ls x, mkNatLit n]
   | .cases c v r => do
-    let c' ← readable globs ls c
-    let v' ← readable globs ls v
-    let r' ← readable globs ls r
+    let c' ← readable R ls c
+    let v' ← readable R ls v
+    let r' ← readable R ls r
     let ty ← inferType v'
     pure (mkApp5 (Lean.mkConst ``ite [Level.succ Level.zero]) ty c'
       (mkApp (Lean.mkConst ``Classical.propDecidable) c') v' r')
   | .undef .real => realLit 0
   | .undef .prop => pure (Lean.mkConst ``False)
-  | .undef t => do Meta.reduce (mkApp (Lean.mkConst ``Ty.default) (toExpr t)) (explicitOnly := false)
-  | .eq x y => do mkEq (← readable globs ls x) (← readable globs ls y)
-  | .lt x y => do mkAppM ``LT.lt #[← readable globs ls x, ← readable globs ls y]
-  | .le x y => do mkAppM ``LE.le #[← readable globs ls x, ← readable globs ls y]
+  | .undef t => do
+    Meta.reduce (mkApp3 (Lean.mkConst ``Ty.default) (mkApp (Lean.mkConst ``Model.base) R.model)
+      (mkApp (Lean.mkConst ``Model.default) R.model) (toExpr t)) (explicitOnly := false)
+  | .eq x y => do mkEq (← readable R ls x) (← readable R ls y)
+  | .lt x y => do mkAppM ``LT.lt #[← readable R ls x, ← readable R ls y]
+  | .le x y => do mkAppM ``LE.le #[← readable R ls x, ← readable R ls y]
   | .tt => pure (Lean.mkConst ``True)
-  | .not p => do pure (mkNot (← readable globs ls p))
-  | .and p q => do pure (mkAnd (← readable globs ls p) (← readable globs ls q))
-  | .or p q => do pure (mkOr (← readable globs ls p) (← readable globs ls q))
-  | .iff p q => do pure (mkIff (← readable globs ls p) (← readable globs ls q))
-  | .imp p q => do mkArrow (← readable globs ls p) (← readable globs ls q)
+  | .not p => do pure (mkNot (← readable R ls p))
+  | .and p q => do pure (mkAnd (← readable R ls p) (← readable R ls q))
+  | .or p q => do pure (mkOr (← readable R ls p) (← readable R ls q))
+  | .iff p q => do pure (mkIff (← readable R ls p) (← readable R ls q))
+  | .imp p q => do mkArrow (← readable R ls p) (← readable R ls q)
   | .all t b => do
-    withLocalDeclD `x (← tyExpr t) fun v => do
-      mkForallFVars #[v] (← readable globs (v :: ls) b)
+    withLocalDeclD `x (← tyExpr R.model t) fun v => do
+      mkForallFVars #[v] (← readable R (v :: ls) b)
   | .ex t b => do
-    withLocalDeclD `x (← tyExpr t) fun v => do
-      let body ← mkLambdaFVars #[v] (← readable globs (v :: ls) b)
+    withLocalDeclD `x (← tyExpr R.model t) fun v => do
+      let body ← mkLambdaFVars #[v] (← readable R (v :: ls) b)
       mkAppM ``Exists #[body]
   | .integral b => do
-    withLocalDeclD `x (← tyExpr .unit) fun v => do
-      let f ← mkLambdaFVars #[v] (← readable globs (v :: ls) b)
+    withLocalDeclD `x (← tyExpr R.model .unit) fun v => do
+      let f ← mkLambdaFVars #[v] (← readable R (v :: ls) b)
       let stx ← `(MeasureTheory.integral MeasureTheory.MeasureSpace.volume $(← exprToSyntax f))
       let e ← Term.elabTerm stx none
       Term.synthesizeSyntheticMVarsNoPostponing
       instantiateMVars e
-  | .guard _ e => readable globs ls e
+  | .guard _ e => readable R ls e
+  | .the t b => do
+    let T ← tyExpr R.model t
+    let dflt := mkApp3 (Lean.mkConst ``Ty.default) (mkApp (Lean.mkConst ``Model.base) R.model)
+      (mkApp (Lean.mkConst ``Model.default) R.model) (toExpr t)
+    let inst := mkApp2 (Lean.mkConst ``Nonempty.intro [Level.succ Level.zero]) T dflt
+    withLocalDeclD `x T fun v => do
+      let p ← mkLambdaFVars #[v] (← readable R (v :: ls) b)
+      pure (mkApp3 (Lean.mkConst ``Classical.epsilon [Level.succ Level.zero]) T inst p)
 
 /-- Recompile natively (the literal `Foo.doc` is certified by `Foo.compiled`). -/
-def nativeDoc (rel : String) : CommandElabM Doc := do
+def nativeDoc (ns : Name) (rel : String) : CommandElabM Doc := do
   let path ← liftCoreM (resolvePath rel)
   let lines ← readLines path
-  let src : Packed := lines.map fun l => (l.length, packLine l)
-  match compileArticle src with
+  let V ← liftCoreM <| evalVocab (ns ++ `vocab)
+  match compileArticle V (packedOf lines) with
   | some d => pure d
   | none => throwError "the article could not be compiled"
 
-syntax (name := proofreadSemantics) "#proofread_semantics " ident str : command
+syntax (name := proofreadSemantics) "#proofread_semantics " ident str (" with " ident)? : command
 
 @[command_elab proofreadSemantics] def elabProofreadSemantics : CommandElab := fun stx => do
   let ns := stx[1].getId
   let some rel := stx[2].isStrLit? | throwUnsupportedSyntax
+  let modelName ← match stx[3].getOptional? with
+    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v[1]
+    | none => pure ``Model.empty
   checkFresh ns rel
-  let d ← nativeDoc rel
+  let d ← nativeDoc ns rel
+  liftCoreM <| addDecl <| Declaration.defnDecl
+    { name := ns ++ `model, levelParams := [], type := Lean.mkConst ``Model, value := Lean.mkConst modelName,
+      hints := ReducibilityHints.abbrev, safety := DefinitionSafety.safe }
+  let M := Lean.mkConst (ns ++ `model)
+  let consts ← liftTermElabM <| modelConsts M
   -- definitions as readable constants
-  let mut globs : Array Expr := #[]
+  let mut R : RCtx := ⟨M, consts, #[]⟩
   let mut vals : Array Expr := #[]
+  let baseE := mkApp (Lean.mkConst ``Model.base) M
   for i in [0:d.values.length] do
     let v := d.values[i]!
     let g := d.globs[i]!
     let name := ns ++ Name.mkSimple (defName d i)
     let (ty, val) ← liftTermElabM do
-      let ty ← tyExpr g.ty
-      let val ← readable globs [] v
+      let ty ← tyExpr M g.ty
+      let val ← readable R [] v
       pure (ty, val)
     liftCoreM <| addDecl <| Declaration.defnDecl
       { name, levelParams := [], type := ty, value := val,
         hints := ReducibilityHints.regular 0, safety := DefinitionSafety.safe }
-    globs := globs.push (Lean.mkConst name)
+    R := { R with globs := R.globs.push (Lean.mkConst name) }
     vals := vals.push (mkApp4 (Lean.mkConst ``Sigma.mk [Level.zero, Level.zero]) (Lean.mkConst ``Ty)
-      (Lean.mkConst ``Ty.denote) (toExpr g.ty) (Lean.mkConst name))
+      (mkApp (Lean.mkConst ``Ty.denote) baseE) (toExpr g.ty) (Lean.mkConst name))
   -- the environment of definition values
-  let valTy := Lean.mkConst ``Val
+  let valTy := mkApp (Lean.mkConst ``Val) baseE
   let gList := listExpr valTy vals.toList
   liftCoreM <| addDecl <| Declaration.defnDecl
     { name := ns ++ `G, levelParams := [], type := mkApp (Lean.mkConst ``List [Level.zero]) valTy,
       value := gList, hints := ReducibilityHints.abbrev, safety := DefinitionSafety.safe }
-  let envLhs ← liftTermElabM do mkAppM ``Doc.env #[Lean.mkConst (ns ++ `doc)]
-  let envRhs ← liftTermElabM do mkAppM ``Option.some #[Lean.mkConst (ns ++ `G)]
-  let envTy ← liftTermElabM do inferType envLhs
+  let docE := Lean.mkConst (ns ++ `doc)
+  let gE := Lean.mkConst (ns ++ `G)
+  let envLhs := mkApp2 (Lean.mkConst ``Doc.env) M docE
+  let envRhs := mkApp2 (Lean.mkConst ``Option.some [Level.zero])
+    (mkApp (Lean.mkConst ``List [Level.zero]) valTy) gE
+  let envTy := mkApp (Lean.mkConst ``Option [Level.zero]) (mkApp (Lean.mkConst ``List [Level.zero]) valTy)
   kernelRefl (ns ++ `env) envTy envLhs envRhs
   -- well-definedness of each definition
   for i in [0:d.values.length] do
     let v := d.values[i]!
-    let p ← liftTermElabM do readable globs [] v.defined
+    let p ← liftTermElabM do readable R [] v.defined
     let pn := ns ++ Name.mkSimple s!"wellDefined{i}"
     liftCoreM <| addDecl <| Declaration.defnDecl
       { name := pn, levelParams := [], type := mkSort Level.zero, value := p,
         hints := ReducibilityHints.regular 0, safety := DefinitionSafety.safe }
-    let lhs ← liftTermElabM do mkAppM ``Doc.welldef #[Lean.mkConst (ns ++ `doc), Lean.mkConst (ns ++ `G), mkNatLit i]
+    let lhs := mkApp4 (Lean.mkConst ``Doc.welldef) M docE gE (mkNatLit i)
     kernelRefl (ns ++ Name.mkSimple s!"welldef{i}") (mkSort Level.zero) lhs (Lean.mkConst pn)
   -- claims
   for k in [0:d.claims.length] do
     let c := d.claims[k]!
     let (pd, pc) ← liftTermElabM do
-      pure (← readable globs [] c.body.defined, ← readable globs [] c.body)
+      pure (← readable R [] c.body.defined, ← readable R [] c.body)
     let dn := ns ++ Name.mkSimple s!"meaningful{k}"
     let cn := ns ++ Name.mkSimple s!"claim{k}"
     liftCoreM <| addDecl <| Declaration.defnDecl
@@ -177,12 +219,11 @@ syntax (name := proofreadSemantics) "#proofread_semantics " ident str : command
     liftCoreM <| addDecl <| Declaration.defnDecl
       { name := cn, levelParams := [], type := mkSort Level.zero, value := pc,
         hints := ReducibilityHints.regular 0, safety := DefinitionSafety.safe }
-    let lhs ← liftTermElabM do mkAppM ``Doc.holds #[Lean.mkConst (ns ++ `doc), Lean.mkConst (ns ++ `G), mkNatLit k]
+    let lhs := mkApp4 (Lean.mkConst ``Doc.holds) M docE gE (mkNatLit k)
     kernelRefl (ns ++ Name.mkSimple s!"holds{k}") (mkSort Level.zero) lhs
       (mkAnd (Lean.mkConst dn) (Lean.mkConst cn))
   -- sizes, premises and proof obligations
   let natE := Lean.mkConst ``Nat
-  let docE := Lean.mkConst (ns ++ `doc)
   let lenTy := natE
   kernelRefl (ns ++ `definitionCount) lenTy
     (← liftTermElabM do mkAppM ``List.length #[← mkAppM ``Doc.values #[docE]]) (mkNatLit d.values.length)
@@ -208,8 +249,9 @@ syntax (name := proofreadSemantics) "#proofread_semantics " ident str : command
     let thm ← `(command| theorem $(id s!"obligation{k}_sound") :
         $(id s!"obligation{k}") →
           (∀ j ∈ Doc.premisesOf $(mkIdent (ns ++ `doc)) $(Syntax.mkNumLit (toString k)),
-            Doc.holds $(mkIdent (ns ++ `doc)) $(mkIdent (ns ++ `G)) j) →
-          Doc.holds $(mkIdent (ns ++ `doc)) $(mkIdent (ns ++ `G)) $(Syntax.mkNumLit (toString k)) := by
+            Doc.holds $(mkIdent (ns ++ `model)) $(mkIdent (ns ++ `doc)) $(mkIdent (ns ++ `G)) j) →
+          Doc.holds $(mkIdent (ns ++ `model)) $(mkIdent (ns ++ `doc)) $(mkIdent (ns ++ `G))
+            $(Syntax.mkNumLit (toString k)) := by
         intro h hp
         rw [$(id s!"premises{k}"):ident] at hp
         rw [$(id s!"holds{k}"):ident]

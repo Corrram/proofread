@@ -1,0 +1,65 @@
+%% proofread.sty -- a LaTeX article checked by Proofread.
+%%
+%% Proofread reads the article source itself: its sentences, formulas and the
+%% macros of its preamble. This package does not change what the article says,
+%% and Proofread reads no markup from it. It
+%%   * loads the packages for the notation the grammar reads (\coloneqq from
+%%     mathtools, \mathbb and \le from amssymb);
+%%   * records the Lean module that certifies the article (\proofreadmodule),
+%%     so that editors and CI can find it;
+%%   * with the option `status`, marks every labelled result in the margin with
+%%     its verification status, read from \jobname.proofread.tex, which
+%%     #proofread_certify writes next to the article. Without the option the
+%%     typeset article is unchanged (use it for journal submission).
+%%
+%% Usage, in the preamble:
+%%   \usepackage[status]{proofread}
+%%   \proofreadmodule{Papers.Rockel2026ExactBlest.Source.Certified}
+%% and, optionally, \proofreadreport where a one-line summary should appear.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{proofread}[2026/10/25 v0.2 Proofread status marks]
+\RequirePackage{mathtools}
+\RequirePackage{amssymb}
+\newif\ifproofread@status
+\DeclareOption{status}{\proofread@statustrue}
+\ProcessOptions\relax
+
+% The Lean module whose #proofread_certify checks this article.
+\newcommand*\proofreadmodule[1]{\gdef\proofread@module{#1}}
+\newcommand*\proofread@module{}
+
+% Entries of the status file.
+\newcommand*\proofreadstatus[2]{\expandafter\gdef\csname proofread@st@#1\endcsname{#2}}
+\newcommand*\proofreadsummary[6]{%
+  \gdef\proofread@summary{#2 of #1 claims verified (#3 derived in the text from
+    their citations); #5 of #6 sentences compiled; #4 definitions well defined}}
+\newcommand*\proofread@summary{no status file (build the Lean module first)}
+\newcommand*\proofreadreport{\textsf{Proofread:} \proofread@summary.}
+
+% The margin marks.
+\newcommand*\proofread@markof[1]{%
+  \ifcsname proofread@mk@#1\endcsname\csname proofread@mk@#1\endcsname\fi}
+\newcommand*\proofread@mk@text{$\checkmark$\,derived}
+\newcommand*\proofread@mk@verified{$\checkmark$\,checked}
+\newcommand*\proofread@mk@partial{$\circ$\,partly checked}
+\newcommand*\proofread@mk@compiled{$\circ$\,compiled}
+\newcommand*\proofread@mark[1]{%
+  \ifcsname proofread@st@#1\endcsname
+    \edef\proofread@st{\csname proofread@st@#1\endcsname}%
+    \ifx\proofread@st\proofread@none\else
+      \ifmmode\else\leavevmode\marginpar{\raggedright\footnotesize\sffamily
+        \proofread@markof{\proofread@st}}\fi
+    \fi
+  \fi}
+\def\proofread@none{none}
+
+\ifproofread@status
+  \AtBeginDocument{%
+    \InputIfFileExists{\jobname.proofread.tex}{}{%
+      \PackageWarningNoLine{proofread}{No status file \jobname.proofread.tex}}}
+  % wrap \label after every package has set it up (hyperref redefines it)
+  \AddToHook{begindocument/end}{%
+    \let\proofread@label\label
+    \renewcommand*\label[1]{\proofread@label{#1}\proofread@mark{#1}}}
+\fi
+\endinput

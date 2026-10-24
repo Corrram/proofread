@@ -1,9 +1,10 @@
 import Proofread.Doc
+import Proofread.Denote
 
 /-! # What a compiled article asserts, and when it is verified
 
-`Doc.holds d G k`: claim `k` is meaningful and true, where `G` are the values of
-the article's definitions. A `Certificate` states that the definitions evaluate
+`Doc.holds M d G k`: claim `k` is meaningful and true, where `M` interprets the
+vocabulary and `G` are the values of the article's definitions. A `Certificate` states that the definitions evaluate
 to `G` and are well defined, that every verified claim follows from its
 premises, and that premises are ranked below the claims that use them (so the
 premise structure has no cycles). `Certificate.sound` then gives every verified
@@ -12,18 +13,18 @@ namespace Proofread
 
 namespace Doc
 
-noncomputable def env (d : Doc) : Option (List Val) := evalDefs [] d.values
+noncomputable def env (M : Model) (d : Doc) : Option (List (Val M.base)) := evalDefs M [] d.values
 
 def premisesOf (d : Doc) (k : Nat) : List Nat := (d.claims[k]?.map (·.premises)).getD []
 
-noncomputable def holds (d : Doc) (G : List Val) (k : Nat) : Prop :=
+noncomputable def holds (M : Model) (d : Doc) (G : List (Val M.base)) (k : Nat) : Prop :=
   match d.claims[k]? with
-  | some c => Val.prop (denote G [] c.body.sound)
+  | some c => Val.prop (denote M G [] c.body.sound)
   | none => False
 
-noncomputable def welldef (d : Doc) (G : List Val) (i : Nat) : Prop :=
+noncomputable def welldef (M : Model) (d : Doc) (G : List (Val M.base)) (i : Nat) : Prop :=
   match d.values[i]? with
-  | some v => Val.prop (denote G [] v.defined)
+  | some v => Val.prop (denote M G [] v.defined)
   | none => False
 
 /-- Premises of verified claims are verified and of lower rank. -/
@@ -33,15 +34,15 @@ def ranked (d : Doc) (verified : List Nat) (rank : List Nat) : Bool :=
 
 end Doc
 
-structure Certificate (d : Doc) (G : List Val) (verified rank : List Nat) : Prop where
-  env : d.env = some G
-  defs : ∀ i, i < d.values.length → d.welldef G i
+structure Certificate (M : Model) (d : Doc) (G : List (Val M.base)) (verified rank : List Nat) : Prop where
+  env : d.env M = some G
+  defs : ∀ i, i < d.values.length → d.welldef M G i
   ranked : d.ranked verified rank = true
-  step : ∀ k ∈ verified, (∀ j ∈ d.premisesOf k, d.holds G j) → d.holds G k
+  step : ∀ k ∈ verified, (∀ j ∈ d.premisesOf k, d.holds M G j) → d.holds M G k
 
-theorem Certificate.sound {d : Doc} {G : List Val} {verified rank : List Nat}
-    (c : Certificate d G verified rank) : ∀ k ∈ verified, d.holds G k := by
-  have key : ∀ n, ∀ k ∈ verified, rank.getD k 0 < n → d.holds G k := by
+theorem Certificate.sound {M : Model} {d : Doc} {G : List (Val M.base)} {verified rank : List Nat}
+    (c : Certificate M d G verified rank) : ∀ k ∈ verified, d.holds M G k := by
+  have key : ∀ n, ∀ k ∈ verified, rank.getD k 0 < n → d.holds M G k := by
     intro n
     induction n with
     | zero => intro k _ h; exact absurd h (Nat.not_lt_zero _)
@@ -70,12 +71,12 @@ theorem allList_mem {P : Nat → Prop} : ∀ {ks : List Nat}, allList P ks → �
     · exact allList_mem hs k hk
 
 /-- A certificate from one proof per definition and one step per verified claim. -/
-theorem Certificate.ofLists {d : Doc} {G : List Val} {verified rank : List Nat} {n : Nat}
-    (hn : d.values.length = n) (env : d.env = some G)
-    (defs : allList (fun i => d.welldef G i) (List.range n))
+theorem Certificate.ofLists {M : Model} {d : Doc} {G : List (Val M.base)} {verified rank : List Nat} {n : Nat}
+    (hn : d.values.length = n) (env : d.env M = some G)
+    (defs : allList (fun i => d.welldef M G i) (List.range n))
     (ranked : d.ranked verified rank = true)
-    (step : allList (fun k => (∀ j ∈ d.premisesOf k, d.holds G j) → d.holds G k) verified) :
-    Certificate d G verified rank where
+    (step : allList (fun k => (∀ j ∈ d.premisesOf k, d.holds M G j) → d.holds M G k) verified) :
+    Certificate M d G verified rank where
   env := env
   defs i hi := allList_mem defs i (List.mem_range.mpr (hn ▸ hi))
   ranked := ranked

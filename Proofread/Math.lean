@@ -32,7 +32,7 @@ inductive MT where
   | cases (rows : List (MT × MT))
   | sig (name dom cod : MT)
   | conj (xs : List MT)
-  deriving Repr, Inhabited
+  deriving Repr, Inhabited, Lean.ToExpr
 
 /-- Math tokens after removing typesetting. -/
 inductive MTok where

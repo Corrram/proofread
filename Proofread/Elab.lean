@@ -85,7 +85,7 @@ structure Extremum where
   isMax : Bool
   f : MT
   value : MT
-  deriving Repr, Inhabited
+  deriving Repr, Inhabited, Lean.ToExpr
 
 structure St where
   /-- The vocabulary of the article. -/
@@ -101,6 +101,8 @@ structure St where
   preds : List (List Codes × Nat) := []
   /-- Named objects, e.g. `tent map`. -/
   named : List (List Codes × Nat) := []
+  /-- Classes by their plural noun, e.g. `bivariate copulas` (for names). -/
+  classes : List (List Codes × Nat) := []
   labels : List (Codes × List Nat) := []
   /-- Labels of definitions (cited definitions are always available). -/
   defLabels : List Codes := []
@@ -113,7 +115,7 @@ structure St where
   /-- The most recent subject (for `its`). -/
   subject : Option (Tm × Ty) := none
   topic : Topic := .none
-  deriving Inhabited
+  deriving Inhabited, Lean.ToExpr
 
 abbrev M := ExceptT Err (StateM St)
 

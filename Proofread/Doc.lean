@@ -610,7 +610,7 @@ def defClass (sym : MT) (plural : List Codes) (np : List Chunk) : M (List Nat ×
   let i ← addGlob ⟨key, .fn b.ty .prop, [none], false⟩ p
   let sing := plural.dropLast ++ (plural.getLast?.map singular).toList
   let names := [sing, (sing.getLast?).toList].eraseDups
-  modify fun st => { st with nouns := st.nouns ++ names.map (·, i) }
+  modify fun st => { st with nouns := st.nouns ++ names.map (·, i), classes := st.classes ++ [(plural, i)] }
   pure ([i], [])
 
 /-! ## Claim sentences -/
@@ -793,57 +793,68 @@ def sentence (c : SentCtx) (s : Sent) : M (List Nat × List Nat) := do
 
 end Compile
 
+/-- The state of the compiler between sentences. -/
+structure CState where
+  st : St
+  /-- Index of the next sentence. -/
+  idx : Nat := 0
+  /-- Outcomes of the sentences read so far, latest first. -/
+  outcomesRev : List Outcome := []
+  proofs : List ProofInfo := []
+  deriving Inhabited, Lean.ToExpr
+
+/-- Environment index of each result, by label (for proofs that name their result). -/
+def envTable (ss : List Sentence) : List (Codes × Nat) :=
+  ss.filterMap fun s => match s.ctx.kind with
+    | .result _ => some (s.ctx.label, s.ctx.env)
+    | _ => none
+
 open Compile in
-/-- Compile all sentences. A failing sentence leaves no trace in the state. -/
-def compileSentences (ss : List Sentence) : StateM St (List Outcome × List ProofInfo) := do
-  let envOf (label : Codes) : Nat :=
-    match ss.find? (fun s => s.ctx.label == label && match s.ctx.kind with | .result _ => true | _ => false) with
-    | some s => s.ctx.env
-    | none => 0
-  let rec go : Nat → List Sentence → Nat → List Outcome → List ProofInfo →
-      StateM St (List Outcome × List ProofInfo)
-    | 0, _, _, acc, ps => pure (acc.reverse, ps)
-    | _ + 1, [], _, acc, ps => pure (acc.reverse, ps)
-    | f + 1, s :: rest, idx, acc, ps => do
-      -- entering a new environment resets proof-local state
-      let st0 ← get
-      if st0.proofEnv != s.ctx.env then
-        set { st0 with proofEnv := s.ctx.env, proofCites := [], proofSteps := [], topic := .none }
-      let ps := match s.ctx.kind with
-        | .proof => if ps.any (·.env == s.ctx.env) then ps
-          else ps ++ [({ env := s.ctx.env, proves := s.ctx.proves, steps := [], cites := [], complete := true } : ProofInfo)]
-        | _ => ps
-      let saved ← get
-      match Grammar.parseSentence s with
-      | none =>
-        let ps := ps.map fun p => if p.env == s.ctx.env then { p with complete := false } else p
-        go f rest (idx + 1) (.prose :: acc) ps
-      | some sent =>
-        let c : SentCtx := ⟨s.ctx, envOf s.ctx.proves, idx⟩
-        let labelled : M (List Nat × List Nat) := do
-          let (ds, cs) ← Compile.sentence c sent
-          match sent with
-          | .claims _ _ _ =>
-            -- labels of displays in the sentence, and of the enclosing result, name its claims
-            let ls := s.toks.filterMap fun p => match p.tok with | .ref .label l => some l | _ => none
-            let ls := match s.ctx.kind with
-              | .result _ => if s.ctx.label.isEmpty then ls else s.ctx.label :: ls
-              | _ => ls
-            Compile.addLabels ls cs false
-          | _ => pure ()
-          pure (ds, cs)
-        let (r, st) := labelled.run.run saved
-        match r with
-        | .ok (ds, cs) =>
-          set st
-          let ps := ps.map fun p => if p.env == s.ctx.env then
-            { p with steps := st.proofSteps, cites := st.proofCites } else p
-          go f rest (idx + 1) (.compiled ds cs :: acc) ps
-        | .error e =>
-          set saved
-          let ps := ps.map fun p => if p.env == s.ctx.env then { p with complete := false } else p
-          go f rest (idx + 1) (.failed e :: acc) ps
-  go (ss.length + 1) ss 0 [] []
+/-- Compile one sentence. A failing sentence leaves no trace in the state. -/
+def compileOne (envs : List (Codes × Nat)) (c : CState) (s : Sentence) : CState :=
+  -- entering a new environment resets proof-local state
+  let st0 := c.st
+  let st0 := if st0.proofEnv != s.ctx.env then
+      { st0 with proofEnv := s.ctx.env, proofCites := [], proofSteps := [], topic := .none }
+    else st0
+  let ps := match s.ctx.kind with
+    | .proof => if c.proofs.any (·.env == s.ctx.env) then c.proofs
+      else c.proofs ++ [({ env := s.ctx.env, proves := s.ctx.proves, steps := [], cites := [], complete := true } : ProofInfo)]
+    | _ => c.proofs
+  let incomplete (ps : List ProofInfo) : List ProofInfo :=
+    ps.map fun p => if p.env == s.ctx.env then { p with complete := false } else p
+  match Grammar.parseSentence s with
+  | none => { c with st := st0, idx := c.idx + 1, outcomesRev := .prose :: c.outcomesRev, proofs := incomplete ps }
+  | some sent =>
+    let sc : SentCtx := ⟨s.ctx, (envs.lookup s.ctx.proves).getD 0, c.idx⟩
+    let labelled : M (List Nat × List Nat) := do
+      let (ds, cs) ← Compile.sentence sc sent
+      match sent with
+      | .claims _ _ _ =>
+        -- labels of displays in the sentence, and of the enclosing result, name its claims
+        let ls := s.toks.filterMap fun p => match p.tok with | .ref .label l => some l | _ => none
+        let ls := match s.ctx.kind with
+          | .result _ => if s.ctx.label.isEmpty then ls else s.ctx.label :: ls
+          | _ => ls
+        Compile.addLabels ls cs false
+      | _ => pure ()
+      pure (ds, cs)
+    let (r, st) := labelled.run.run st0
+    match r with
+    | .ok (ds, cs) =>
+      let ps := ps.map fun p => if p.env == s.ctx.env then
+        { p with steps := st.proofSteps, cites := st.proofCites } else p
+      { st, idx := c.idx + 1, outcomesRev := .compiled ds cs :: c.outcomesRev, proofs := ps }
+    | .error e =>
+      { c with st := st0, idx := c.idx + 1, outcomesRev := .failed e :: c.outcomesRev, proofs := incomplete ps }
+
+/-- Compile a list of sentences, starting from a compiler state. -/
+def compileAll (envs : List (Codes × Nat)) (c : CState) (ss : List Sentence) : CState :=
+  ss.foldl (compileOne envs) c
+
+theorem compileAll_append (envs : List (Codes × Nat)) (c : CState) (a b : List Sentence) :
+    compileAll envs c (a ++ b) = compileAll envs (compileAll envs c a) b := by
+  simp [compileAll, List.foldl_append]
 
 /-- Results whose printed proof compiled completely: the proof is their premise. -/
 def closeProofs (ss : List Sentence) (claims : List Claim) (ps : List ProofInfo) : List Claim :=
@@ -861,33 +872,59 @@ def beginDocument (ts : List PTok) : List PTok :=
   | some i => ts.drop (i + 1)
   | none => ts
 
+/-- The document of a compiled article, from the final compiler state. -/
+def finish (ss : List Sentence) (c : CState) : Doc :=
+  let st := c.st
+  let claims := closeProofs ss st.claims c.proofs
+  ⟨st.globs, st.values, claims, ss.map (fun s => (s.ctx, s.start, s.stop)), c.outcomesRev.reverse,
+    st.labels, c.proofs, st.preds ++ st.named ++ st.ops ++ st.classes⟩
+
 /-- Compile the sentences of an article into its document. -/
 def assemble (V : Vocab) (ss : List Sentence) : Doc :=
-  let ((outcomes, proofs), st) := (compileSentences ss).run { vocab := V }
-  let claims := closeProofs ss st.claims proofs
-  ⟨st.globs, st.values, claims, ss.map (fun s => (s.ctx, s.start, s.stop)), outcomes, st.labels, proofs,
-    st.preds ++ st.named ++ st.ops⟩
+  finish ss (compileAll (envTable ss) { st := { vocab := V } } ss)
 
-def isBeginDocument (len n : Nat) : Bool :=
-  (unpackLine len n).take 16 == w!"\\begin{document}"
+def isBeginDocument (l : Codes) : Bool := l.take 16 == w!"\\begin{document}"
 
-/-- The complete compilation of an article from its packed source lines, with the
+/-- Lex and segment the paragraph blocks in order: the completed sentences, the
+final math-mode stack and the segmentation state. -/
+def lexSeg (ms : Macros) : List (Nat × List Codes) → List Bool → Segment.St →
+    Option (List Sentence × List Bool × Segment.St)
+  | [], m, s => some ([], m, s)
+  | (p, ls) :: bs, m, s =>
+    match lexBlock ms (joinLines ls) m with
+    | none => none
+    | some (t, m') =>
+      let r := segBlock p (t ++ blockBreak m') s
+      match lexSeg ms bs m' r.2 with
+      | none => none
+      | some (rest, m'', s'') => some (r.1 ++ rest, m'', s'')
+
+theorem lexSeg_nil (ms : Macros) (m : List Bool) (s : Segment.St) : lexSeg ms [] m s = some ([], m, s) := rfl
+
+theorem lexSeg_cons (ms : Macros) (p : Nat) (ls : List Codes) (b : Codes) (bs : List (Nat × List Codes))
+    (m m' m'' : List Bool) (s s' s'' : Segment.St) (t : List PTok) (ss rest : List Sentence)
+    (h0 : joinLines ls = b) (h1 : lexBlock ms b m = some (t, m')) (h2 : segBlock p (t ++ blockBreak m') s = (ss, s'))
+    (h3 : lexSeg ms bs m' s' = some (rest, m'', s'')) :
+    lexSeg ms ((p, ls) :: bs) m s = some (ss ++ rest, m'', s'') := by
+  simp [lexSeg, h0, h1, h2, h3]
+
+/-- The complete compilation of an article from its source lines, with the
 vocabulary `V`: the preamble supplies the macros, the paragraphs after
 `\begin{document}` the sentences. -/
-def compileArticle (V : Vocab) (src : Packed) : Option Doc := do
-  let k ← src.findIdx? (fun (len, n) => isBeginDocument len n)
-  let ms ← macrosOf (Packed.join (src.take k))
-  let bs := blocksOf (src.drop (k + 1)) (Packed.offset (src.take (k + 1))) none []
-  let (ts, _) ← lexBlocks ms bs []
-  some (assemble V (sentences ts))
+def compileArticle (V : Vocab) (src : Source) : Option Doc := do
+  let k ← src.findIdx? isBeginDocument
+  let ms ← macrosOf (joinLines (src.take k))
+  let bs := blocksOf (src.drop (k + 1)) (linesOffset (src.take (k + 1))) none []
+  let (ss, _, s) ← lexSeg ms bs [] {}
+  some (assemble V (ss ++ segFinish s))
 
 /-- Staged kernel certificates compose to the compilation of the whole source. -/
-theorem compileArticle_eq {V : Vocab} {src : Packed} {k : Nat} {ms : Macros} {bs : List (Nat × Packed)}
-    {ts : List PTok} {st : List Bool} {ss : List Sentence} {d : Doc}
-    (h0 : src.findIdx? (fun (len, n) => isBeginDocument len n) = some k)
-    (h1 : macrosOf (Packed.join (src.take k)) = some ms)
-    (h2 : blocksOf (src.drop (k + 1)) (Packed.offset (src.take (k + 1))) none [] = bs)
-    (h3 : lexBlocks ms bs [] = some (ts, st)) (h4 : sentences ts = ss) (h5 : assemble V ss = d) :
+theorem compileArticle_eq {V : Vocab} {src : Source} {k : Nat} {ms : Macros} {bs : List (Nat × List Codes)}
+    {ss ss' : List Sentence} {m : List Bool} {s : Segment.St} {d : Doc}
+    (h0 : src.findIdx? isBeginDocument = some k)
+    (h1 : macrosOf (joinLines (src.take k)) = some ms)
+    (h2 : blocksOf (src.drop (k + 1)) (linesOffset (src.take (k + 1))) none [] = bs)
+    (h3 : lexSeg ms bs [] {} = some (ss, m, s)) (h4 : ss ++ segFinish s = ss') (h5 : assemble V ss' = d) :
     compileArticle V src = some d := by
   simp [compileArticle, h0, h1, h2, h3, h4, h5]
 
