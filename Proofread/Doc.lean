@@ -106,17 +106,27 @@ def conjPreds (ty : Ty) : List Tm → Option Tm
   | [p] => some p
   | ps => some (.lam ty .tt (Elab.conjAll (ps.map fun p => Tm.app p (.loc 0))))
 
+/-- An endpoint of an interval domain: a numeral, or a closed term (`g_*`). -/
+def closedBound (m : MT) : M Tm := do
+  match constTm m with
+  | some t => pure t
+  | none => match Elab.constMT m with
+    | some t => pure t
+    | none => do
+      let (t, ty) ← Elab.term 100000 [] none m
+      coerce t ty .real
+
 /-- The type and predicate of a domain formula (`[0,1]`, `[-1,1]`, `\CC`). -/
 def domainOf (calculus : Bool) (d : MT) : M (Ty × Option Tm) := do
   if isZeroOne d && !calculus then pure (.unit, none)
   else match d with
     | .interval lo hi => do
-      let l ← liftO (constTm lo) E.unsupported
-      let h ← liftO (constTm hi) E.unsupported
+      let l ← closedBound lo
+      let h ← closedBound hi
       pure (.real, some (intervalPred l h))
     | .ival lo hi lopen ropen => do
-      let l ← liftO (Elab.constMT lo) E.unsupported
-      let h ← liftO (Elab.constMT hi) E.unsupported
+      let l ← closedBound lo
+      let h ← closedBound hi
       pure (.real, some (.lam .real .tt (Elab.intervalTm l h lopen ropen (.loc 0))))
     | .tuple [lo, hi] => do
       let l ← liftO (Elab.constMT lo) E.unsupported
@@ -207,33 +217,12 @@ def nounPhrase (np : List Chunk) : M BindInfo := do
   let all := (preds ++ pms.map (·.pred) ++ qms ++ memberPred).eraseDups
   pure ⟨name, ty, conjPreds ty all⟩
 
-def binderInfos : Bind → M (List BindInfo)
-  | .every vs d => do
-    let (ty, p) ← domainOf false d
-    pure (vs.map fun v => ⟨v, ty, p⟩)
-  | .noun np => do pure [← nounPhrase np]
-  | .on _ => pure []
-  | .many bs => do
-    let mut out := []
-    for b in bs do
-      match b with
-      | .every vs d => do
-        let (ty, p) ← domainOf false d
-        out := out ++ vs.map fun v => ⟨v, ty, p⟩
-      | _ => fail E.unsupported
-    pure out
-
-def scopeOf (bs : List BindInfo) : Scope := (bs.map fun b => (b.name, b.ty)).reverse
-
-def wrap (bs : List BindInfo) (body : Tm) : Tm :=
-  forallBinders (bs.map fun b => (b.name, b.ty, b.pred.map fun p => Tm.app p (.loc 0))) body
-
 /-- Free identifiers of a formula (for `On I,`). -/
 def freeIds : Nat → List Codes → MT → List Codes
   | 0, _, _ => []
   | f + 1, bound, m =>
     match m with
-    | .id n => if bound.contains n then [] else [n]
+    | .id n => if bound.contains n || n == [42] then [] else [n]
     | .num _ => []
     -- the base of `e_b` is a symbol, not a variable
     | .sub (.id _) i => freeIds f bound i
@@ -248,6 +237,38 @@ def freeIds : Nat → List Codes → MT → List Codes
     | .chain x rs => freeIds f bound x ++ rs.flatMap (fun r => freeIds f bound r.2)
     | .mapsto p b => freeIds f (freeIds f [] p ++ bound) b
     | _ => []
+
+def binderInfos : Bind → M (List BindInfo)
+  | .every vs d => do
+    let (ty, p) ← domainOf false d
+    pure (vs.map fun v => ⟨v, ty, p⟩)
+  | .noun np => do pure [← nounPhrase np]
+  | .on _ => pure []
+  | .ifCond φ => do
+    -- the free variables of φ range over ℝ; φ is the domain of the last one
+    let st ← get
+    let free := ((freeIds 64 [] φ).filter fun n => !(st.globs.any fun g => g.key == n && !g.family)).eraseDups
+    match free.reverse with
+    | [] => fail E.unsupported
+    | last :: _ =>
+      let sc : Scope := free.reverse.map (·, Ty.real)
+      let (p, pty) ← Elab.term 100000 sc none φ
+      if pty != .prop then fail E.type
+      pure (free.map fun v => (⟨v, .real, if v == last then some (.lam .real .tt p) else none⟩ : BindInfo))
+  | .many bs => do
+    let mut out := []
+    for b in bs do
+      match b with
+      | .every vs d => do
+        let (ty, p) ← domainOf false d
+        out := out ++ vs.map fun v => ⟨v, ty, p⟩
+      | _ => fail E.unsupported
+    pure out
+
+def scopeOf (bs : List BindInfo) : Scope := (bs.map fun b => (b.name, b.ty)).reverse
+
+def wrap (bs : List BindInfo) (body : Tm) : Tm :=
+  forallBinders (bs.map fun b => (b.name, b.ty, b.pred.map fun p => Tm.app p (.loc 0))) body
 
 def clauseMaths : Clause → List MT
   | .fact f | .holds f => [f]
@@ -628,6 +649,8 @@ def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := d
     let (key, family) ← match lhs with
       | .sub (.id k) (.id p) => if p == b.name then pure (k, true) else fail E.unsupported
       | .id k => pure (k, false)
+      -- `f(x)\coloneqq e`: a function of the binder's variable
+      | .app (.id k) [.id p] => if p == b.name then pure (k, false) else fail E.unsupported
       | _ => fail E.unsupported
     let sc : Scope := [(b.name, b.ty)]
     let (v, vty) ← term F sc none rhs
@@ -639,6 +662,35 @@ def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := d
     let ids ← ps.mapM fun p => emit c (wrap [b] p) []
     pure ([i], ids)
   | _ => fail E.unsupported
+
+/-- `Set $d_0\coloneqq e$.`: constants, with the claims of the rest of each chain;
+under a binder, families and functions of the binder's variable (`setDef`). -/
+def constDefs (c : SentCtx) (b : Option BindInfo) (defs : List MT) (labels : List Codes) :
+    M (List Nat × List Nat) := do
+  let mut ds : List Nat := []
+  let mut cs : List Nat := []
+  for m in defs do
+    match b with
+    | some bi =>
+      let (d', c') ← setDef c bi m
+      ds := ds ++ d'
+      cs := cs ++ c'
+    | none =>
+      match m with
+      | .chain lhs ((.defeq, rhs) :: more) => do
+        let some key := symKey lhs | fail E.unsupported
+        let (v, vty) ← term F [] none rhs
+        let i ← addGlob ⟨key, vty, [], false⟩ v
+        let x : Tm × Ty := (.glob i, vty)
+        let ps ← more.mapM fun (r, y) => do
+          if r == .mem then Elab.term.member F [] x y
+          else do relTm r x (← term F [] none y)
+        let ids ← ps.mapM fun p => emit c p []
+        ds := ds ++ [i]
+        cs := cs ++ ids
+      | _ => fail E.unsupported
+  addLabels labels cs true
+  pure (ds, cs)
 
 /-- `For B, let $X_p$ denote NP`. -/
 def letDenote (b : BindInfo) (sym : MT) (np : List Chunk) : M (List Nat × List Nat) := do
@@ -963,8 +1015,21 @@ def sentence (c : SentCtx) (s : Sent) : M (List Nat × List Nat) := do
   | .defIs b items => do
     let bs ← binderInfos b
     let [bi] := bs | fail E.unsupported
+    -- `the X and the Y are DISPLAY` with one definition each
+    let items := items.flatMap fun it => match it.defn with
+      | .conj xs =>
+        let parts := (it.name.splitOn w!"and").map fun ws => ws.filter (· != w!"the")
+        if parts.length == xs.length then (xs.zip parts).map fun (x, n) => ({ it with defn := x, name := n } : DefItem)
+        else xs.map fun x => ({ it with defn := x } : DefItem)
+      | _ => [it]
     let rs ← items.mapM (defItem c bi)
     pure (rs.flatMap (·.1), rs.flatMap (·.2))
+  | .constDefs b defs labels => do
+    match b with
+    | some bd => do
+      let [bi] ← binderInfos bd | fail E.unsupported
+      constDefs c (some bi) defs labels
+    | none => constDefs c none defs labels
   | .defReads b _ sg disp labels => do
     let [bi] ← binderInfos b | fail E.unsupported
     defReads c bi sg disp labels

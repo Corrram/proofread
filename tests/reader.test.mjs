@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sourcePin, mathRegions, markSentences, sentenceStatus, validateReport, renderCompiledArticle, inspectorData} from '../reader/compiled.mjs';
+import {sourcePin, mathRegions, markSentences, sentenceStatus, validateReport, renderCompiledArticle, inspectorData} from '../reader/reader.mjs';
 
 const source = String.raw`\title{A compiled note}
 \author{A mathematician}

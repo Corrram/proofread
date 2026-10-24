@@ -1,21 +1,46 @@
 {
-  // LeanMirror: check a LaTeX article with its Lean certificate.
-  // Copy into your project's .vscode/tasks.json and set the inputs below: the Lean
-  // file with #mirror_article (its article pin is updated first, so that Lake
-  // recompiles an edited article), the module with #mirror_certify, and its report.
+  // Proofread: check a LaTeX article while you write it.
+  // Copy into your project's .vscode/tasks.json and adjust the inputs below.
+  //
+  // "Proofread: quick check" runs the compiler natively on the open .tex file
+  // (about a second): undefined symbols, sentences the grammar cannot read, and
+  // with --claims the formal reading of every claim. Nothing is certified.
+  //
+  // "Proofread: certify" updates the article's pin in the Lean file with
+  // #proofread_article (so that Lake recompiles the edited article), builds the
+  // module with #proofread_certify, and reports every claim that is not verified.
+  //
   // Findings appear as squiggles in the .tex file and in the Problems panel.
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "LeanMirror: check article",
+      "label": "Proofread: quick check",
       "type": "shell",
-      "command": "python .lake/packages/lean-mirror/scripts/tex_diagnostics.py ${input:report} --pin ${input:compiledFile} && lake build ${input:certifyModule} && python .lake/packages/lean-mirror/scripts/tex_diagnostics.py ${input:report} --prose",
+      "command": "lake exe proofread check ${file} --vocab ${input:vocab} --prose",
       "group": "build",
       "presentation": { "reveal": "silent", "clear": true },
       "problemMatcher": [
         {
-          "owner": "leanmirror",
-          "source": "LeanMirror",
+          "owner": "proofread",
+          "source": "Proofread",
+          "fileLocation": ["autoDetect", "${workspaceFolder}"],
+          "pattern": {
+            "regexp": "^(.+\\.tex):(\\d+):(\\d+):\\s+(error|warning|info):\\s+(.*)$",
+            "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5
+          }
+        }
+      ]
+    },
+    {
+      "label": "Proofread: certify",
+      "type": "shell",
+      "command": "python .lake/packages/proofread/scripts/proofread_diagnostics.py ${input:report} --pin ${input:compiledFile} && lake build ${input:certifyModule} && python .lake/packages/proofread/scripts/proofread_diagnostics.py ${input:report} --prose",
+      "group": "build",
+      "presentation": { "reveal": "silent", "clear": true },
+      "problemMatcher": [
+        {
+          "owner": "proofread",
+          "source": "Proofread",
           "fileLocation": ["relative", "${workspaceFolder}"],
           "pattern": {
             "regexp": "^(.+\\.tex):(\\d+):(\\d+):\\s+(error|warning|info):\\s+(.*)$",
@@ -35,11 +60,13 @@
     }
   ],
   "inputs": [
-    { "id": "certifyModule", "type": "promptString", "description": "Lean module with #mirror_certify",
+    { "id": "vocab", "type": "promptString", "description": "Vocabulary for the quick check (core or unitsquare)",
+      "default": "unitsquare" },
+    { "id": "certifyModule", "type": "promptString", "description": "Lean module with #proofread_certify",
       "default": "Papers.Rockel2026ExactBlest.Source.Certified" },
-    { "id": "compiledFile", "type": "promptString", "description": "Lean file with #mirror_article",
+    { "id": "compiledFile", "type": "promptString", "description": "Lean file with #proofread_article",
       "default": "Papers/Rockel2026ExactBlest/Source/Compiled.lean" },
-    { "id": "report", "type": "promptString", "description": "The article's .mirror.json",
-      "default": "Papers/Rockel2026ExactBlest/Source/article.mirror.json" }
+    { "id": "report", "type": "promptString", "description": "The article's .proofread.json",
+      "default": "Papers/Rockel2026ExactBlest/Source/article.proofread.json" }
   ]
 }

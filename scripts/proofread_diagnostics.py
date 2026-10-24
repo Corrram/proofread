@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Report LeanMirror's verdict on each sentence of a compiled article.
+"""Report Proofread's verdict on each sentence of a compiled article.
 
-`#mirror_certify` writes `<article>.mirror.json` next to the article. This script
+`#proofread_certify` writes `<article>.proofread.json` next to the article. This script
 prints one line per finding in the format editors understand:
 
     article.tex:201:5: error: undefined symbol: \\Upsilon
@@ -22,7 +22,7 @@ ROLE = {"statement": "statement", "proof step": "proof step", "text": "claim", "
 
 
 def source_pin(text):
-    """FNV-1a (64 bit) of the UTF-8 bytes with CRLF normalized, as `LeanMirror.Tex.sourcePin`."""
+    """FNV-1a (64 bit) of the UTF-8 bytes with CRLF normalized, as `Proofread.sourcePin`."""
     h = 0xcbf29ce484222325
     for b in text.replace("\r\n", "\n").encode("utf-8"):
         h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
@@ -31,9 +31,9 @@ def source_pin(text):
 
 def update_pin(lean_file, pin):
     text = lean_file.read_text(encoding="utf-8")
-    new, n = re.subn(r'(#mirror_article\s+\S+\s+"[^"]+"\s+)"fnv1a64:[0-9a-f]{16}"', lambda m: m.group(1) + f'"{pin}"', text)
+    new, n = re.subn(r'(#proofread_article\s+\S+\s+"[^"]+"\s+)"fnv1a64:[0-9a-f]{16}"', lambda m: m.group(1) + f'"{pin}"', text)
     if n != 1:
-        raise SystemExit(f"{lean_file}: expected one #mirror_article command with a pin")
+        raise SystemExit(f"{lean_file}: expected one #proofread_article command with a pin")
     if new != text:
         lean_file.write_text(new, encoding="utf-8")
     return new != text
@@ -44,7 +44,7 @@ def findings(report, prose=False):
     for s in sentences:
         where = (s["line"], s["column"])
         if s["outcome"] == "failed":
-            yield (*where, "error", f"LeanMirror could not compile this sentence: {s['message']}")
+            yield (*where, "error", f"Proofread could not compile this sentence: {s['message']}")
         elif s["outcome"] == "prose" and prose and s["environment"] != "text":
             yield (*where, "info", f"not read by the grammar ({s['environment']}); this sentence makes no checked claim")
     for c in report["claims"]:
@@ -59,13 +59,13 @@ def findings(report, prose=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("report", type=pathlib.Path, help="the article's .mirror.json")
+    ap.add_argument("report", type=pathlib.Path, help="the article's .proofread.json")
     ap.add_argument("--prose", action="store_true", help="also list uncompiled sentences in results and proofs")
     ap.add_argument("--strict", action="store_true", help="fail on unverified claims as well")
     ap.add_argument("--relative-to", type=pathlib.Path, default=pathlib.Path.cwd(),
                     help="print paths relative to this directory (default: the working directory)")
     ap.add_argument("--pin", type=pathlib.Path, metavar="LEAN_FILE",
-                    help="update the article pin in this Lean file (the one with #mirror_article) and exit")
+                    help="update the article pin in this Lean file (the one with #proofread_article) and exit")
     args = ap.parse_args()
     report = json.loads(args.report.read_text(encoding="utf-8"))
     tex = (args.report.parent / report["article"]).resolve()
@@ -82,7 +82,7 @@ def main():
     if report.get("sourceHash") != pin:
         print(f"{shown.as_posix()}:1:1: error: the article changed after it was certified "
               f"(report {report.get('sourceHash')}, file {pin}); run with --pin on the Lean file "
-              f"with #mirror_article, then rebuild")
+              f"with #proofread_article, then rebuild")
         return 1
     for line, col, severity, message in sorted(findings(report, args.prose)):
         print(f"{shown.as_posix()}:{line}:{col}: {severity}: {message}")

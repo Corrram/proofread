@@ -118,7 +118,7 @@ register_option proofread.stages : Nat := {
 
 /-- Sentences per kernel-checked chunk of the assembly. -/
 register_option proofread.chunk : Nat := {
-  defValue := 32
+  defValue := 8
   descr := "number of sentences in each kernel-checked chunk of an article's compilation" }
 
 /-- The certificates of `#proofread_article`, stage by stage. All proofs are

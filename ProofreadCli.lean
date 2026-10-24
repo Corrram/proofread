@@ -97,7 +97,7 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | "check" :: path :: opts =>
     let vocab := match optArg opts "--vocab" with
-      | some "unitsquare" => Vocab.core ++ UnitSquare.vocab
+      | some "unitsquare" => UnitSquare.withCore
       | _ => Vocab.core
     let failed ← checkArticle vocab path (opts.contains "--prose") (opts.contains "--claims")
     pure (if failed == 0 then 0 else 1)

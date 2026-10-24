@@ -195,6 +195,9 @@ inductive Bind where
   | every (vars : List Codes) (dom : MT)
   | noun (np : List Chunk)
   | on (dom : MT)
+  /-- `If $φ$, then …`: the free variables of `φ` range over the real numbers
+  subject to `φ`. -/
+  | ifCond (cond : MT)
   /-- `For $x\in A$ and $y\in B$,`. -/
   | many (bs : List Bind)
   deriving Repr, Inhabited
@@ -236,7 +239,12 @@ def binder (cs : List Chunk) : Option (Bind × List Chunk) :=
         | some r => do
           let (m, r') ← formula r
           some (.on m, r')
-        | none => none
+        | none =>
+          match kw [w!"if"] cs with
+          | some r => do
+            let (m, r') ← formula r
+            some (.ifCond m, r')
+          | none => none
 
 inductive Subj where
   | math (m : MT)
@@ -569,8 +577,11 @@ def clauses : Nat → List Chunk → List CClause → Option (List CClause)
     let (c, r) ← cclause cs
     if isEnd r then some (c :: acc).reverse
     else
-      let r' ← punct 44 r
-      match kw [w!"and"] r' <|> kw [w!"so"] r' <|> kw [w!"whereas"] r' with
+      -- `, and`, `, so`, `, whereas`, or `and` between two formulas
+      let next := (do
+        let r' ← punct 44 r
+        kw [w!"and"] r' <|> kw [w!"so"] r' <|> kw [w!"whereas"] r') <|> kw [w!"and"] r
+      match next with
       | some r'' => clauses f r'' (c :: acc)
       | none => none
 
@@ -589,7 +600,7 @@ def defItem (cs : List Chunk) : Option (DefItem × List Chunk) := do
     | _ + 1, [], _ => none
     | g + 1, c :: rest, acc =>
       match c with
-      | .w v => if v == w!"is" then some (acc.reverse, rest) else nameWords g rest (v :: acc)
+      | .w v => if v == w!"is" || v == w!"are" then some (acc.reverse, rest) else nameWords g rest (v :: acc)
       | .m _ => nameWords g rest acc
       | _ => none
   let (name, r1) ← nameWords 16 r []
@@ -629,7 +640,37 @@ inductive Sent where
   | weSay (subj : List Chunk) (phrase : List Codes) (obj : List Chunk) (cond : MT)
       (vars : List Codes) (dom : MT)
   | claims (topic : Topic) (binds : List Bind) (cs : List CClause)
+  /-- `Set $X\coloneqq e$.`, `Define DISPLAY.`, `The NAME is $X\coloneqq e$.`, and
+  under a binder `For B, set $f(x)\coloneqq e$.`: definitions of constants (or of
+  functions of the binder's variable), possibly several, each `\coloneqq`. -/
+  | constDefs (bind : Option Bind) (defs : List MT) (labels : List Codes)
   deriving Repr, Inhabited
+
+def isDefeq : MT → Bool
+  | .chain _ ((.defeq, _) :: _) => true
+  | _ => false
+
+/-- Definitions joined by `,` and `and`, inline or displayed (a display may hold
+several, separated by `\qquad`). -/
+def defList : Nat → List Chunk → List MT → List Codes → Option (List MT × List Codes × List Chunk)
+  | 0, _, _, _ => none
+  | f + 1, cs, acc, ls => do
+    let (ms, ls', r) ← (do let (m, ls', r) ← display cs; some (m, ls', r)) <|>
+      (do let (m, r) ← formula cs; some (m, [], r))
+    let items := match ms with | .conj xs => xs | m => [m]
+    let acc := acc ++ items
+    let ls := ls ++ ls'
+    let next := (punct 44 r >>= fun r' => (kw [w!"and"] r').getD r' |> some) <|> kw [w!"and"] r
+    match next with
+    | some r' =>
+      match defList f r' acc ls with
+      | some res => some res
+      | none => some (acc, ls, r)
+    | none => some (acc, ls, r)
+
+def constDefsOf (b : Option Bind) (cs : List Chunk) : Option Sent := do
+  let (items, ls, r) ← defList 6 cs [] []
+  if isEnd (trailer r) && !items.isEmpty && items.all isDefeq then some (.constDefs b items ls) else none
 
 def sentence (cs : List Chunk) : Option Sent :=
   let (topic, cs) := marker cs
@@ -647,7 +688,7 @@ def sentence (cs : List Chunk) : Option Sent :=
   | none =>
   -- define $sig$ by DISPLAY [and observe that $φ$ for every $x\in A$].
   match kw [w!"define"] cs with
-  | some r => do
+  | some r => (do
     let (s, r1) ← sig r
     let r2 ← kw [w!"by"] r1
     let (pieces, ls, r3) ← defPieces 6 r2 [] []
@@ -658,7 +699,11 @@ def sentence (cs : List Chunk) : Option Sent :=
       let r6 ← kw [w!"for", w!"every"] r5
       let (ts, r7) ← mathChunk r6
       let (vs, dom) ← binderMath ts
-      if isEnd r7 then some (.defBy s pieces ls (some (φ, vs, dom))) else none
+      if isEnd r7 then some (.defBy s pieces ls (some (φ, vs, dom))) else none) <|>
+    constDefsOf none r
+  | none =>
+  match kw [w!"set"] cs with
+  | some r => constDefsOf none r
   | none =>
   -- We say that a N $x$ is PHRASE of a ADJ $sig$ if $φ$ for all $u,v\in A$.
   match kw [w!"we", w!"say", w!"that", w!"a"] cs with
@@ -730,7 +775,7 @@ where
   claimsOrDefs (topic : Topic) (cs : List Chunk) : Option Sent :=
     match binder cs with
     | some (b, r) =>
-      match punct 44 r with
+      match (punct 44 r).map fun r1 => (kw [w!"then"] r1).getD r1 with
       | some r1 =>
         -- For B, let $S$ denote NP.
         match kw [w!"let"] r1 with
@@ -746,10 +791,10 @@ where
         | none =>
         -- For B, set $X\coloneqq e$ and let $S$ be NP[, where …].
         match kw [w!"set"] r1 with
-        | some r2 => do
+        | some r2 => (do
           let (m, r3) ← formula r2
           let r4 ← kw [w!"and", w!"let"] r3
-          letBe b [m] r4
+          letBe b [m] r4) <|> constDefsOf (some b) r2
         | none =>
         -- For B, the NAME $sig$ reads DISPLAY.
         match defReads b r1 with
@@ -764,9 +809,14 @@ where
           let cs ← clauses 8 r2 []
           some (.claims topic bs cs)
       | none => none
-    | none => do
-      let cs ← clauses 8 cs []
-      some (.claims topic [] cs)
+    | none =>
+      (do
+        let items ← defItems 4 cs []
+        let ds := items.flatMap fun it => match it.defn with | .conj xs => xs | m => [m]
+        if ds.all isDefeq then some (.constDefs none ds (items.flatMap (·.labels))) else none) <|>
+      (do
+        let cs ← clauses 8 cs []
+        some (.claims topic [] cs))
   defReads (b : Bind) (cs : List Chunk) : Option Sent := do
     let r ← kw [w!"the"] cs
     let (name, r1) ← wordsUntil [] 6 r [] <|> (do

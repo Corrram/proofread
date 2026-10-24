@@ -64,8 +64,9 @@ partial def readable (R : RCtx) (ls : List Expr) : Tm → TermElabM Expr
   | .prim p => do
     match primConst p with
     | some n => pure (Lean.mkConst n)
-    | none => Meta.reduce (mkApp2 (Lean.mkConst ``Prim.denote) (mkApp (Lean.mkConst ``Model.base) R.model) (toExpr p))
-        (explicitOnly := false)
+    | none =>
+      let e := mkApp2 (Lean.mkConst ``Prim.denote) (mkApp (Lean.mkConst ``Model.base) R.model) (toExpr p)
+      Meta.reduce e (explicitOnly := false)
   | .app (.app (.prim .rpow) x) y => do mkAppM ``HPow.hPow #[← readable R ls x, ← readable R ls y]
   | .app (.app (.prim .min) x) y => do mkAppM ``Min.min #[← readable R ls x, ← readable R ls y]
   | .app (.app (.prim .max) x) y => do mkAppM ``Max.max #[← readable R ls x, ← readable R ls y]
@@ -106,8 +107,9 @@ partial def readable (R : RCtx) (ls : List Expr) : Tm → TermElabM Expr
   | .undef .real => realLit 0
   | .undef .prop => pure (Lean.mkConst ``False)
   | .undef t => do
-    Meta.reduce (mkApp3 (Lean.mkConst ``Ty.default) (mkApp (Lean.mkConst ``Model.base) R.model)
-      (mkApp (Lean.mkConst ``Model.default) R.model) (toExpr t)) (explicitOnly := false)
+    let e := mkApp3 (Lean.mkConst ``Ty.default) (mkApp (Lean.mkConst ``Model.base) R.model)
+      (mkApp (Lean.mkConst ``Model.default) R.model) (toExpr t)
+    Meta.reduce e (explicitOnly := false)
   | .eq x y => do mkEq (← readable R ls x) (← readable R ls y)
   | .lt x y => do mkAppM ``LT.lt #[← readable R ls x, ← readable R ls y]
   | .le x y => do mkAppM ``LE.le #[← readable R ls x, ← readable R ls y]
@@ -146,7 +148,7 @@ def nativeDoc (ns : Name) (rel : String) : CommandElabM Doc := do
   let path ← liftCoreM (resolvePath rel)
   let lines ← readLines path
   let V ← liftCoreM <| evalVocab (ns ++ `vocab)
-  match compileArticle V (packedOf lines) with
+  match compileArticle V lines with
   | some d => pure d
   | none => throwError "the article could not be compiled"
 

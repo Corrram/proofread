@@ -1,243 +1,116 @@
-# LeanMirror
+# Proofread
 
-Readable, executable mathematics with Lean-checked definitions, statements, and proof steps.
+One LaTeX source, read twice: typeset as the paper you submit, and compiled by
+Lean into kernel-checked statements and proofs.
 
-LeanMirror is a general Lean add-on for writing precise mathematical statements
-in familiar language and notation, interpreting them as Lean propositions, and
-checking their correspondence with established Lean theorems. It supplies the
-language, its interpretation, presentation tools, and certificate machinery.
-Subject-specific definitions and applications belong in downstream projects.
+Proofread compiles an ordinary mathematical article, written in good
+mathematical English, to Lean. Every symbol must be defined in the article
+before it is used, every sentence has one fixed reading, and a proof step may
+use only the results it cites. The kernel checks the compilation of the file,
+the readable Lean form of every definition and claim, every justification and
+the final certificate. There is no second, hand-written formal version that
+could drift away from the paper.
 
-## Verify an article in its own LaTeX
+```latex
+For a copula $C$, the population version of Blest's rank correlation is
+\begin{equation}
+  \label{eq:nu-def}
+  \nu(C)\coloneqq24\int_0^1\!\int_0^1(1-u)\,C(u,v)\de u\de v-2,
+\end{equation}
+```
 
-`LeanMirror.Tex` compiles an ordinary article — its definitions, statements and
-proof sentences, as written — and verifies it in Lean. Every symbol must be
-defined in the article before it is used, every sentence has one fixed reading,
-and a proof sentence may use only the results it cites. The kernel checks the
-compilation of the file, the readable Lean form of each claim, every
-justification and the final certificate:
+becomes the Lean definition
 
 ```lean
-#mirror_article Foo "article.tex" "fnv1a64:…"   -- kernel-checked compilation (pinned source)
-#mirror_semantics Foo "article.tex"             -- Foo.nu, Foo.claimK, Foo.obligationK, …
--- your proofs: J.proofK : Foo.obligationK, J.definedI : Foo.wellDefinedI
-#mirror_certify Foo "article.tex" using J      -- Foo.certificate, Foo.verifiedK, article.mirror.json
+def nu : (I → I → ℝ) → ℝ := fun x => 24 * ∫ y, ∫ z, (1 - ↑z) * x z y - 2
 ```
 
-The single-text reader (`reader/compiled.mjs`) renders the article from that
-source with the status of every sentence; `scripts/tex_diagnostics.py` and
-`editors/vscode/tasks.json` show the same findings in an editor. See
-[articles compiled from LaTeX](docs/tex-articles.md). The exemplar is Corollary
-3.2 of arXiv:2609.27634 in `lean-verifications`
-(`Papers/Rockel2026ExactBlest/Source`).
+and the first sentence of Corollary 3.2,
 
-## Compile a precise companion directly from LaTeX source
-
-The new source frontend checks the actual prose and formula strings in editable
-`.tex` files, including their quantifiers, domains and proof steps. Its Lean
-certificate connects the entire source to the existing theorem and includes a
-kernel-checked compilation equation. Checked definitions are linked from the
-readable statements. Unsupported text stops compilation.
-
-```sh
-npm ci
-python scripts/source.py serve examples/source
+```latex
+Every $C\in\CC$ satisfies $|\nu(C)-\rho(C)|\le\frac14$.
 ```
 
-Open `http://127.0.0.1:8767`, or run `build` instead of `serve` for an offline
-reader. See [source companions](docs/source-companions.md) for the supported
-precise language, certificate guarantees, and remaining presentation boundaries.
-The earlier tree-authored examples and original-article evidence reader remain
-available below.
+becomes `claim14 : ∀ x : I → I → ℝ, copulas x → |nu x - rho x| ≤ 1 / 4`,
+derived in Lean from exactly the sentences of its proof and the results they
+cite.
 
-## Read the analysis companion
+## The exemplar
 
-The first proof-document example follows selected passages of **Jiří Lebl’s
-[Basic Analysis I, §2.1](https://github.com/jirilebl/ra/blob/e21ec524ca7d54f800c693b948020c188d21d01f/ch-seq-ser.tex)**:
-sequence and convergence definitions, uniqueness of limits, and boundedness of
-convergent sequences. It keeps the positive integer indices, epsilon/2 proof,
-calculation chains, and finite-maximum argument. It does **not** certify the rest
-of the textbook. The original source is pinned, licensed, and included for comparison.
+*Rank weighting and asymmetry in Blest's rank correlation: two exact regions*
+(arXiv:2609.27634) is compiled in
+[lean-verifications](https://github.com/Corrram/lean-verifications)
+(`Papers/Rockel2026ExactBlest/Source`). Its `article-edits.diff` lists every
+edit the conventions asked for. See its README for the current coverage.
 
-```sh
-lake exe cache get
-npm ci
-python scripts/mirror.py serve examples/analysis
+## Use
+
+Add the package to `lakefile.toml`:
+
+```toml
+[[require]]
+name = "proofread"
+git = "https://github.com/Corrram/proofread.git"
+rev = "<commit>"
 ```
 
-Open `http://127.0.0.1:8766`. The reader compares the original and precise companion,
-links notation to definitions, and lets you inspect proof obligations and mathlib
-counterparts. All assets are local; after building, `build/analysis/index.html`
-also works offline. `python scripts/mirror.py build` generates it without a server.
+Then, next to `article.tex`:
 
-The editable, executable source is [Analysis.lean](LeanMirror/Examples/Analysis.lean).
-The generated [LaTeX edition](examples/analysis/companion.tex) and
-[document data](examples/analysis/document.mirror.json) come from its checked tree.
-Change the Lean source and rebuild; do not edit generated formulas separately.
+```lean
+-- Compiled.lean: the kernel compiles the article
+import Proofread.Meta
+import Proofread.Library.UnitSquare
+def vocab : Proofread.Vocab := .core ++ Proofread.UnitSquare.vocab
+#proofread_article Foo "article.tex" "fnv1a64:…" with vocab
 
-This is a working first version of the document engine, not an automatic translator
-for arbitrary articles. The authoring interface is currently Lean plus a controlled
-mathematical language. The browser is a reader, not yet a live proof editor.
-See [authoring and extending documents](docs/documents.md).
+-- Article.lean: every definition and claim as readable Lean
+import Proofread.Readable
+import Proofread.Library.UnitSquareModel
+#proofread_semantics Foo "article.tex" with Proofread.UnitSquare.model
 
-## Classical examples
+-- Proofs.lean: your proofs `proofK : Foo.obligationK`, `definedI : Foo.wellDefinedI`
 
-The [classical examples](LeanMirror/Examples/Classical.lean) connect these precise
-statements, for arbitrary real numbers $x,y$, to actual mathlib proofs:
+-- Certified.lean: the certificate, `Foo.verifiedK`, and the reports
+import Proofread.Certify
+#proofread_certify Foo "article.tex" using Proofs
+```
 
-| Readable statement | Mathlib counterpart |
+While writing, `lake exe proofread check article.tex --vocab unitsquare
+--claims` compiles the article natively in about a second and prints each
+undefined symbol, each sentence that does not compile, and the formal reading
+of every claim. `editors/vscode/tasks.json` shows the findings in the editor.
+
+## Documentation
+
+* [Writing for Proofread](docs/writing.md): the house style and the
+  constructions of the grammar, with examples.
+* [From the `.tex` file to the certificate](docs/pipeline.md): the stages,
+  incremental compilation, definedness, the citation audit, the reports and
+  the trust boundary.
+* [Vocabularies and models](docs/vocabularies.md): where the meaning of words
+  that the article does not define comes from.
+
+## Layout
+
+| Path | Contents |
 | --- | --- |
-| $\lvert x+y\rvert\leq \lvert x\rvert+\lvert y\rvert$ | `abs_add_le` |
-| $\lvert xy\rvert=\lvert x\rvert\lvert y\rvert$ | `abs_mul` |
-| $2xy\leq x^2+y^2$ | `two_mul_le_add_sq` |
+| `Proofread/Lex.lean`, `Segment.lean`, `Math.lean` | Lexing (macros, blocks), sentence segmentation, formulas |
+| `Proofread/Grammar.lean`, `Elab.lean`, `Doc.lean` | Sentence constructions and their readings, compilation of an article (`compileArticle`) |
+| `Proofread/Syntax.lean`, `Denote.lean` | The core language and its Lean denotation |
+| `Proofread/Vocab.lean`, `Library/` | Vocabularies, `phrase!`, the unit-square vocabulary and its model |
+| `Proofread/Meta.lean`, `Readable.lean`, `Certify.lean` | The commands `#proofread_article`, `#proofread_semantics`, `#proofread_certify` |
+| `Proofread/Check.lean`, `ProofreadCli.lean` | The native checker `lake exe proofread` |
+| `reader/` | The web reader: the article rendered from its source with the status of every sentence |
+| `tex/proofread.sty` | Optional margin marks in the PDF (`\usepackage[status]{proofread}`) |
+| `scripts/proofread_diagnostics.py` | Findings from the certificate report, for editors and CI |
 
-The last is the quadratic form of the arithmetic–geometric mean inequality.
-It holds for every pair of real numbers, without nonnegativity assumptions.
-The meaning of the square notation is explicitly related to mathlib's power
-operation by a checked definition correspondence.
-
-For example, the triangle inequality is written:
-
-```lean
-def triangleStatement : Expr Symbol [] .prop :=
-  [math| |- Let x be realNumber. Let y be realNumber.
-    \abs{x + y} \le \abs{x} + \abs{y}]
-```
-
-The target is obtained from the type of the actual mathlib proof, specialized to
-real numbers:
-
-```lean
-def TriangleTarget : Prop :=
-  statement_of% (fun x y : ℝ => abs_add_le x y)
-```
-
-Lean compiles a proof of `triangleStatement.eval model () ↔ TriangleTarget`.
-A `Certificate` combines that correspondence with mathlib's proof. Its `proved`
-theorem then establishes the interpreted companion statement. Each example's
-correspondence unfolds definitions without invoking the result being transferred.
-All definition bridges, correspondences, certificates, and resulting theorems are
-audited for transitive axioms.
-
-The [generated LaTeX companion](examples/classical.tex) presents the same
-statements as ordinary mathematical theorems. Repeated binders render as familiar
-sentences. Its formulas come from the typed expressions used in the proofs.
-
-## Build and reproduce
-
-With the toolchain in `lean-toolchain` installed:
+## Build
 
 ```sh
 lake exe cache get
 lake build
-python scripts/classical.py
-python scripts/classical.py --check
-npm ci
-npm test
-python -m unittest discover -s tests
-python scripts/mirror.py check examples/analysis
+npm ci && npm test
 ```
 
-The exporter first builds the checked examples. `--check` rejects stale or
-manually altered output. CI builds the library, generic tests, and examples,
-then checks that the generated companion and dependency pins are unchanged.
-`LAKE` may specify an explicit `lake` executable.
-
-## Use in another Lean project
-
-Add a pinned dependency to `lakefile.toml`:
-
-```toml
-[[require]]
-name = "lean-mirror"
-git = "https://github.com/Corrram/lean-mirror.git"
-rev = "<full reviewed commit SHA>"
-```
-
-Then `import LeanMirror`. The package uses Lean 4.34.0 and the exact mathlib
-revision recorded in its dependency manifest.
-
-## Architecture
-
-| Module | Responsibility |
-| --- | --- |
-| `Core` | Typed expressions, scoped variables, mathematical interpretation, certificates |
-| `Notation` | Controlled language elaborating into typed expressions |
-| `Latex` | Mathematical rendering and minimal definition closure |
-| `Presentation` | Structured presentation data and definition links |
-| `Document` | Scoped proof trees, node obligations, generic soundness theorem, audited export |
-| `DocumentNotation` | Readable `Fix`, `Assume`, `Choose`, `Have`, `Suffices`, `Conclude` syntax |
-| `Audit` | Extract theorem types and reject nonstandard transitive axioms |
-| `Source` | Compile precise LaTeX/prose, certify source semantics, definitions and proof steps, export exact source |
-| `Tests` | Scope, interpretation, certificate, and definition-closure checks |
-| `Examples.Classical` | Independent classical examples connected to mathlib |
-
-An application supplies named base types, a typed vocabulary, an interpretation,
-and notation. Definitions and statements share the same expression language.
-Definition bridges relate the chosen meanings to a target library. A statement
-correspondence is an ordinary Lean proof, checked by Lean's kernel.
-
-`statement_of% theoremName` extracts the type of an existing theorem declaration.
-`statement_of% (proofTerm)` extracts the proposition proved by a specialized
-proof, allowing direct use of polymorphic mathlib theorems. The latter rejects
-non-proofs and unresolved expression metavariables.
-
-## Current language
-
-- Named typed symbols such as `\square(x)`.
-- Scoped variables, natural-number literals, and parentheses.
-- Real addition, subtraction, multiplication, fractions, and absolute values.
-- Lebesgue integration over `[0,1]`: `\int_{0}^{1}{u}{body}`.
-- Explicit interval-to-real inclusion: `\real{u}`.
-- Universal/existential quantifiers, strict order `<`, equality, `\le`, `\land`, `\implies`, and `\iff`.
-- `Let x be predicate. statement`, interpreted as universal quantification with
-  that predicate as a hypothesis; binders may be nested.
-
-In `[math| x, y |- expression]`, external names are listed oldest first; the
-internal typed context is newest first. Unknown symbols, unbound variables,
-shadowing, mismatched context lengths, and ill-typed applications are errors.
-The input is a controlled mathematical language, not unrestricted LaTeX.
-Division and integration inherit mathlib's totalized semantics. Applications
-must account for the conditions needed by their usual mathematical meanings.
-
-## Extending the language
-
-The goal is to support a broad range of precise mathematical language while
-keeping the companion close to how mathematicians normally state results.
-A new construction needs its typed syntax, mathematical interpretation, parsing,
-rendering, and scope/precedence checks. New mathematical vocabulary needs explicit
-meanings and definition correspondences. The companion's required definitions
-form a dependency graph; missing definitions, duplicate identifiers, and cycles
-are rejected.
-
-Contributions to the core should apply across mathematical subjects. General
-examples may use classical results from mathlib. Specialized theories and
-individual research developments should remain in their own repositories.
-
-## Trust boundary
-
-Lean checks the interpreted propositions and proof terms. The allowed axioms
-are `propext`, `Classical.choice`, and `Quot.sound`; unfinished proofs (`sorryAx`)
-and additional axioms are rejected by `#assert_lean_mirror_axioms`.
-
-For the older tree-authored and article-overlay paths, the parser, notation metadata, primitive glossary, dependency metadata, and
-renderers remain inspectable software and author-supplied data. They are not
-proved correct in Lean. Sharing the syntax tree ties the interpretation and
-presentation together, but a misleading notation function is still possible.
-Recognizing the intended mathematics in the displayed statement and definitions
-remains a human judgment.
-
-The source frontend additionally checks a compilation equation for each exact
-source string using total Lean parsing and elaboration functions. Its formal
-semantics are specified by these functions. Automatically understanding
-unrestricted prose, verifying a full TeX/browser renderer, and extracting readable
-definitions from arbitrary Lean declarations remain outside this implementation.
-
-LeanMirror’s generic code is licensed under Apache-2.0. The source-derived analysis
-example is CC BY-SA 4.0; see [its attribution and license](examples/analysis/README.md).
-
-The original-article renderer accepts `pageReferences`, a map from source labels
-to positive printed PDF page numbers, for `\pageref`. Inspect the pinned PDF
-when supplying this map: HTML flow does not determine printed pagination.
-Missing or unused page entries fail rendering. Unnumbered proof labels retain
-clickable anchors, and small-cap and underlined prose retain their styling.
+Lean 4.34.0 with the mathlib revision in `lake-manifest.json`. The generic code
+is licensed under Apache-2.0.

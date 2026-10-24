@@ -46,28 +46,6 @@ def roleString : Role → String
   | .step _ => "proof step"
   | .text => "text"
 
-/-- A Lean-identifier name for a definition: from the phrase that introduced it
-(`the transpose of $C$` gives `transpose`, the class of `bivariate copulas`
-gives `copulas`), or else from its symbol (`\nu` gives `nu`). -/
-def defName (d : Doc) (i : Nat) : String :=
-  let g := (d.globs[i]?).getD default
-  let key := Codes.toString g.key
-  let clean (s : String) : String := String.ofList (s.toList.filter Char.isAlphanum)
-  let phrase := (d.names.find? (·.2 == i)).map (·.1.map (fun w => clean (Codes.toString w)))
-  let camel (ps : List String) : String := match ps with
-    | [] => s!"def{i}"
-    | p :: ps => String.join (p :: ps.map String.capitalize)
-  if key.isEmpty then (phrase.map camel).getD s!"def{i}"
-  else if key.startsWith "^" || key == "\\widehat" || key == "\\hat" || key == "\\overline" then
-    match phrase with
-    | some (w :: _) => w
-    | _ => clean key
-  else if key.contains '{' then
-    match phrase with
-    | some ws@(_ :: _) => ws.getLast!
-    | _ => clean key
-  else clean key
-
 /-- How a claim is verified, for the report. -/
 structure ClaimInfo where
   status : String := "unverified"

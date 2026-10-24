@@ -146,12 +146,28 @@ def interval (lo hi : Tm) (x : Tm) : Tm := .and (.le lo x) (.le x hi)
 def intervalTm (lo hi : Tm) (lopen ropen : Bool) (x : Tm) : Tm :=
   .and (if lopen then .lt lo x else .le lo x) (if ropen then .lt x hi else .le x hi)
 
+/-- The key of a symbol: `x`, or a constant with a subscript (`d_0`, `g_*`,
+`\Delta_0`), whose key is the whole symbol. -/
+def symKey : MT → Option Codes
+  | .id k => some k
+  | .sub (.id k) (.num n) => some (k ++ [95] ++ (Nat.toDigits 10 n).map Char.toNat)
+  | .sub (.id k) (.id i) => some (k ++ [95] ++ i)
+  | .sub (.id k) (.tuple xs) => do
+    let ns ← xs.mapM fun x => match x with | .id n => some n | _ => none
+    some (k ++ [95, 123] ++ (ns.intersperse [44]).flatten ++ [125])
+  | _ => none
+
 /-- The identifiers of a formula (in order of occurrence). -/
 def mtIds : Nat → MT → List Codes
   | 0, _ => []
   | f + 1, m =>
     match m with
-    | .id n => [n]
+    | .id n => if n == [42] then [] else [n]
+    | .sub (.id k) (.num n) => [k ++ [95] ++ (Nat.toDigits 10 n).map Char.toNat]
+    | .sub (.id k) (.id [42]) => [k ++ [95, 42]]
+    | .sub (.id k) (.tuple xs) => match symKey (.sub (.id k) (.tuple xs)) with
+      | some key => [key]
+      | none => [k]
     | .tuple xs | .conj xs | .minm xs | .maxm xs => xs.flatMap (mtIds f)
     | .add x y | .minus x y | .mul x y | .div x y | .frac x y => mtIds f x ++ mtIds f y
     | .neg x | .abs x | .hat x => mtIds f x
@@ -368,6 +384,21 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
     | .sub b i =>
       match b with
       | .id key => do
+        -- a constant with a subscript (`d_0`), unless the index is a variable
+        let ck := match i with
+          | .id x => if (lookupLocal sc x).isSome then none else symKey m
+          | _ => symKey m
+        let c ← match ck with
+          | some k => lookupGlob k
+          | none => pure none
+        match c with
+        | some (h, g) =>
+          if g.family then fail E.unsupported key
+          else match pf, g.ty with
+            | some (s, sty), .fn a _ =>
+              if a == sty then applyAll (.glob h) g.ty g.doms [(s, sty)] else pure (.glob h, g.ty)
+            | _, _ => pure (.glob h, g.ty)
+        | none =>
         let (h, g) ← liftO (← lookupGlob key) E.undefined key
         if !g.family then fail E.unsupported key
         let a ← term f sc none i
@@ -433,17 +464,31 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
       -- (a family `e_b` does not prevent `e` from naming a variable)
       let fresh := ((mtIds 32 pat).filter fun n =>
         (lookupLocal sc n).isNone && !(st.globs.any fun g => g.key == n && !g.family)).eraseDups
-      let sc' := (fresh.map fun v => (v, Ty.real)).reverse ++ sc
+      -- a variable with a membership `v\in D` among the conditions (`D` a class)
+      -- ranges over the elements of `D`; the others over the real numbers
+      let classOf (v : Codes) : Option Codes := conds.findSome? fun c => match c with
+        | .chain (.id v') [(.mem, .id d)] => if v' == v then some d else none
+        | _ => none
+      let ftys ← fresh.mapM fun v => do
+        match classOf v with
+        | some d => match ← lookupGlob d with
+          | some (_, g) => match g.ty with
+            | .fn a .prop => pure a
+            | _ => pure Ty.real
+          | none => pure Ty.real
+        | none => pure Ty.real
+      let fv := fresh.zip ftys
+      let sc' := fv.reverse ++ sc
       let cs ← conds.mapM fun c => do
         let (p, t) ← term f sc' none c
         if t == .prop then pure p else fail E.type
       let body := conjAll cs
-      let lams (b : Tm) : Tm := fresh.foldr (fun _ acc => Tm.lam .real .tt acc) b
-      let tyOf (n : Nat) : Ty := (List.replicate n Ty.real).foldr Ty.fn .prop
+      let lams (b : Tm) : Tm := fv.foldr (fun (_, t) acc => Tm.lam t .tt acc) b
+      let tyOf : Ty := ftys.foldr Ty.fn .prop
       match pat with
-      | .id v => if fresh == [v] then pure (lams body, tyOf 1) else fail E.unsupported
+      | .id v => if fresh == [v] then pure (lams body, tyOf) else fail E.unsupported
       | .tuple [.id v1, .id v2] =>
-        if fresh == [v1, v2] then pure (lams body, tyOf 2)
+        if fresh == [v1, v2] then pure (lams body, tyOf)
         else fail E.unsupported
       | .tuple [e1, e2] => do
         -- the image `{(e₁,e₂) : conds}` as the relation `(p,q) ↦ ∃ vars, conds ∧ p = e₁ ∧ q = e₂`
@@ -457,9 +502,18 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
         -- under the existentials, `p` and `q` are `loc (k+1)` and `loc k`
         let inner := Tm.and (shift 2 k body)
           (.and (.eq (.loc (k + 1)) (shift 2 k a')) (.eq (.loc k) (shift 2 k b')))
-        let exs := fresh.foldr (fun _ acc => Tm.ex .real acc) inner
+        let exs := fv.foldr (fun (_, t) acc => Tm.ex t acc) inner
         pure (.lam aty .tt (.lam bty .tt exs), .fn aty (.fn bty .prop))
-      | _ => fail E.unsupported
+      | e => do
+        -- the image `{e : conds}` as the set `y ↦ ∃ vars, conds ∧ y = e`
+        let k := fresh.length
+        if k == 0 then fail E.unsupported
+        let a ← term f sc' none e
+        let aty := if a.2 == .unit then Ty.unit else Ty.real
+        let a' ← coerce a.1 a.2 aty
+        let inner := Tm.and (shift 1 k body) (.eq (.loc k) (shift 1 k a'))
+        let exs := fv.foldr (fun (_, t) acc => Tm.ex t acc) inner
+        pure (.lam aty .tt exs, .fn aty .prop)
     | .equiv x y => do
       let (p, pt) ← term f sc pf x
       let (q, qt) ← term f sc pf y
@@ -474,7 +528,30 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
       let b ← asReal (← term f sc' none e2)
       let body := Tm.and (.app (.glob dp) (.loc 0)) (.and (.eq a (.loc 2)) (.eq b (.loc 1)))
       pure (.lam .real .tt (.lam .real .tt (.ex vty body)), .fn .real (.fn .real .prop))
+    | .image e v (.id dom) => do
+      -- {e(v) : v ∈ D} as the set y ↦ ∃ v ∈ D, e = y
+      let (dp, dg) ← liftO (← lookupGlob dom) E.undefined dom
+      let vty ← match dg.ty with | .fn a .prop => pure a | _ => fail E.type
+      let sc' := (v, vty) :: (w!"", .real) :: sc
+      let a ← asReal (← term f sc' none e)
+      pure (.lam .real .tt (.ex vty (.and (.app (.glob dp) (.loc 0)) (.eq a (.loc 1)))), .fn .real .prop)
     | .cases rows => casesRows f sc pf rows
+    | .interval lo hi => do
+      -- an interval as a set of real numbers
+      let l ← asReal (← term f sc none lo)
+      let h ← asReal (← term f sc none hi)
+      pure (.lam .real .tt (interval (shift 1 0 l) (shift 1 0 h) (.loc 0)), .fn .real .prop)
+    | .extr isMax st => do
+      -- the element `x` of the set with `y ≤ x` (`x ≤ y`) for every element `y`
+      let (p, pty) ← term f sc pf st
+      match pty with
+      | .fn ety .prop => do
+        let xr ← coerce (.loc 1) ety .real
+        let yr ← coerce (.loc 0) ety .real
+        let bound := if isMax then Tm.le yr xr else Tm.le xr yr
+        let body := Tm.and (.app (shift 1 0 p) (.loc 0)) (.all ety (.imp (.app (shift 2 0 p) (.loc 0)) bound))
+        pure (.the ety body, ety)
+      | _ => fail E.type
     | _ => fail E.unsupported
 where
   casesRows : Nat → Scope → PF → List (MT × MT) → M (Tm × Ty)

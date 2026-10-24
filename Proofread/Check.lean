@@ -95,7 +95,7 @@ def diagnostics (V : Vocab) (rel : String) (lines : List (List Nat)) (d : Doc)
     | .compiled ds ks =>
       if claims then
         for i in ds do
-          out := out ++ [s!"{rel}:{l}:{c}: info: defines {gs.getD i s!"g{i}"}"]
+          out := out ++ [s!"{rel}:{l}:{c}: info: defines {gs.getD i s!"g{i}"} ({defName d i})"]
         for k in ks do
           match d.claims[k]? with
           | some cl => out := out ++ [s!"{rel}:{l}:{c}: info: claim {k}: {cl.body.tex cs gs []}"]

@@ -27,4 +27,8 @@ def vocab : Vocab where
     { phrase := phrase!"with uniform marginals", prenominal := false, ty := Ty.sq, pred := .const 1 },
     { phrase := phrase!"with uniform marginals", prenominal := false, ty := Ty.meas2, pred := .const 3 }]
 
+/-- The core vocabulary followed by this one: what an article about probability on
+the unit square is compiled with. -/
+def withCore : Vocab := Vocab.core ++ vocab
+
 end Proofread.UnitSquare

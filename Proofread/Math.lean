@@ -41,6 +41,9 @@ inductive MT where
   | equiv (x y : MT)
   /-- `\text{word}` between the formulas of a display (e.g. `where`). -/
   | text (w : Codes)
+  /-- `\max\{e : …\}`, `\max_{x\in A} e` (and `\min`): the largest (smallest)
+  element of a set of numbers. -/
+  | extr (isMax : Bool) (set : MT)
   deriving Repr, Inhabited, Lean.ToExpr
 
 /-- Math tokens after removing typesetting. -/
@@ -61,6 +64,9 @@ inductive MTok where
 namespace Math
 
 def wFonts : List Codes := [w!"mathcal", w!"mathbb", w!"mathbf", w!"mathrm", w!"operatorname", w!"mathit"]
+
+/-- Accents that make a new symbol (`\overline{\rho}` is not `\rho`). -/
+def decorations : List Codes := [w!"overline", w!"bar", w!"tilde", w!"underline", w!"check"]
 
 /-- Join font commands with their letters; `\mathrm{d}` is a differential. -/
 def simplify : Nat → List PTok → Option (List MTok)
@@ -102,6 +108,18 @@ def simplify : Nat → List PTok → Option (List MTok)
           | _ => none
         | _ => none
       else if n == w!"tfrac" || n == w!"dfrac" then (MTok.cmd w!"frac" :: ·) <$> simplify f ts
+      -- a decorated symbol `\overline{\rho}` is a name of its own
+      else if decorations.contains n then
+        match ts with
+        | ⟨.lbrace, _, _⟩ :: ⟨inner, _, _⟩ :: ⟨.rbrace, _, _⟩ :: rest =>
+          let name : Option Codes := match inner with
+            | .mvar c => some [c]
+            | .cmd m => some ([92] ++ m)
+            | _ => none
+          match name with
+          | some nm => (MTok.id ([92] ++ n ++ [123] ++ nm ++ [125]) :: ·) <$> simplify f rest
+          | none => (MTok.cmd n :: ·) <$> simplify f ts
+        | _ => (MTok.cmd n :: ·) <$> simplify f ts
       else (MTok.cmd n :: ·) <$> simplify f ts
     | _ => none
 
@@ -126,7 +144,8 @@ def startsFactor : MTok → Bool
   | .sym 40 => true
   | .cmd n => n == w!"frac" || n == w!"int" || n == w!"min" || n == w!"max" || n == w!"widehat"
       || n == w!"hat" || (!(relOf (.cmd n)).isSome && n != w!"mapsto" && n != w!"to" &&
-        n != w!"cdot" && n != w!"qquad" && n != w!"quad" && n != w!"times" && n != w!"top" && n != w!"perp")
+        n != w!"cdot" && n != w!"qquad" && n != w!"quad" && n != w!"times" && n != w!"top" && n != w!"perp" &&
+        n != w!"approx" && n != w!"ldots")
   | _ => false
 
 /-- Heads that may be applied to a parenthesized argument list. -/
@@ -234,7 +253,13 @@ def run : Nat → Mode → List MTok → R
       let (x, r1) ← run f .top rest
       let r2 ← expect .rb r1
       some (x, r2)
-    | .setl :: rest => setBuilder f rest
+    | .setl :: rest =>
+      setBuilder f rest <|>
+      (do
+        -- braces as parentheses: `4\int_0^1\{C(u,u)+C(u,1-u)\}\de u`
+        let (x, r1) ← run f .top rest
+        let r2 ← expect .setr r1
+        some (x, r2))
     | .cmd n :: rest =>
       if n == w!"frac" then do
         let (a, r1) ← run f .group rest
@@ -243,12 +268,27 @@ def run : Nat → Mode → List MTok → R
       else if n == w!"widehat" || n == w!"hat" then do
         let (a, r1) ← run f .group rest
         some (.hat a, r1)
+      else if n == w!"sqrt" then do
+        let (a, r1) ← run f .group rest
+        some (.sup a (.frac (.num 1) (.num 2)), r1)
       else if n == w!"min" || n == w!"max" then
         match rest with
-        | .setl :: r => do
-          let (m, r') ← run f (.list 125 []) r
-          match m with
-          | .conj xs => some (if n == w!"min" then .minm xs else .maxm xs, r')
+        | .setl :: r =>
+          (do
+            let (m, r') ← run f (.list 125 []) r
+            match m with
+            | .conj xs => some (if n == w!"min" then .minm xs else .maxm xs, r')
+            | _ => none) <|>
+          (do
+            let (st, r') ← setBuilder f r
+            some (.extr (n == w!"max") st, r'))
+        | .sym 95 :: r => do
+          -- `\max_{x\in A} e`
+          let (b, r1) ← run f .group r
+          match b with
+          | .chain (.id v) [(.mem, dom)] => do
+            let (body, r2) ← run f (.product false) r1
+            some (.extr (n == w!"max") (.image body v dom), r2)
           | _ => none
         | _ => none
       else if n == w!"int" then
@@ -259,7 +299,8 @@ def run : Nat → Mode → List MTok → R
           let (hi, r3) ← run f .group r2
           integralBody f lo hi r3
         | _ => none
-      else if (relOf (.cmd n)).isSome || n == w!"mapsto" || n == w!"to" || n == w!"qquad" || n == w!"quad" then none
+      else if (relOf (.cmd n)).isSome || n == w!"mapsto" || n == w!"to" || n == w!"qquad" || n == w!"quad" ||
+          n == w!"approx" || n == w!"ldots" then none
       else some (.id ([92] ++ n), rest)
     | .begin e :: rest =>
       if e == w!"cases" then run f (.casesRows []) rest else none
@@ -270,13 +311,22 @@ def run : Nat → Mode → List MTok → R
     | _ => some (.num acc, ts)
   | f + 1, .group, ts =>
     match ts with
-    | .lb :: rest => do
-      let (x, r1) ← run f .top rest
-      let r2 ← expect .rb r1
-      some (x, r2)
+    | .lb :: rest =>
+      (do
+        let (x, r1) ← run f .top rest
+        let r2 ← expect .rb r1
+        some (x, r2)) <|>
+      (do
+        -- a list index `\Omega_{\rho,\gamma}`
+        let (m, r1) ← run f (.list 0 []) rest
+        match m with
+        | .conj xs => some (.tuple xs, r1)
+        | _ => none)
     | .digit d :: rest => some (.num d, rest)
     | .id n :: rest => some (.id n, rest)
     | .cmd n :: rest => some (.id ([92] ++ n), rest)
+    -- `g_*`
+    | .sym 42 :: rest => some (.id [42], rest)
     | _ => none
   | _ + 1, .args acc, ts => some (.tuple acc.reverse, ts)
   | f + 1, .list close acc, ts => do
@@ -284,7 +334,7 @@ def run : Nat → Mode → List MTok → R
     match r1 with
     | .sym 44 :: r2 => run f (.list close (x :: acc)) r2
     | t :: r2 =>
-      if (close == 41 && t == .sym 41) || (close == 125 && t == .setr) then
+      if (close == 41 && t == .sym 41) || (close == 125 && t == .setr) || (close == 0 && t == .rb) then
         some (MT.conj (x :: acc).reverse, r2)
       else none
     | [] => none
@@ -310,7 +360,14 @@ where
         | some r => do
           let (y, rest') ← run g (.additive false) rest
           chainRest g x ((r, y) :: acc) rest'
-        | none => some (if acc.isEmpty then x else .chain x acc.reverse, ts)
+        | none =>
+          -- `\approx 0.4002`: a numerical illustration, which asserts nothing
+          if t == .cmd w!"approx" then
+            let rest' := rest.dropWhile fun u => match u with
+              | .digit _ | .sym 46 | .cmd [108, 100, 111, 116, 115] | .cmd [100, 111, 116, 115] => true
+              | _ => false
+            some (if acc.isEmpty then x else .chain x acc.reverse, rest')
+          else some (if acc.isEmpty then x else .chain x acc.reverse, ts)
       | [] => some (if acc.isEmpty then x else .chain x acc.reverse, ts)
   addRest : Nat → Bool → MT → List MTok → R
     | 0, _, _, _ => none
