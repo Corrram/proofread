@@ -12,9 +12,11 @@ and in the diagnostics, but it asserts nothing checked. Inside results and
 proofs, prose is reported, so uncompiled mathematics stays visible.
 
 The examples are from *Rank weighting and asymmetry in Blest's rank
-correlation* (arXiv:2609.27634), compiled in `lean-verifications`
-(`Papers/Rockel2026ExactBlest/Source/article.tex`). Its
-`article-edits.diff` shows each edit that the conventions asked for.
+correlation* (arXiv:2609.27634) and *The exact region determined by Spearman's
+rho and Gini's gamma* (arXiv:2609.19890), compiled in `lean-verifications`
+(`Papers/Rockel2026ExactBlest/Source`,
+`Papers/AnsariRockelSteinmassl2026RhoGamma/Source`). Each folder's
+`article-edits.diff` shows every edit that the conventions asked for.
 
 ## House style
 
@@ -45,8 +47,13 @@ correlation* (arXiv:2609.27634), compiled in `lean-verifications`
 8. **Split a statement into its claims.** "Both constants are sharp. The
    maximum $\frac{27}{128}$ of $\nu-\eta$ is attained only by $A_{3/4}$, …" is
    two sentences: a remark and a claim.
-9. **No semicolons in prose.** A semicolon joins two claims without saying how
-   they relate. Use a period, ", and", ", so" or ", whereas".
+9. **Decimal values are approximations.** Write `g_*\coloneqq\frac{173-16\sqrt3}{363}\approx0.4002`,
+   not `=0.4002\ldots`: an `\approx` value is an illustration and asserts
+   nothing.
+10. **Image sets name the class of their variable.** Write
+    `\{\rho(C):C\in\CC,\ \gamma(C)=0\}`, not `\{\rho(C):\gamma(C)=0\}`.
+11. **No semicolons in prose.** A semicolon joins two claims without saying how
+    they relate. Use a period, ", and", ", so" or ", whereas".
 
 ## Definitions
 
@@ -63,6 +70,11 @@ correlation* (arXiv:2609.27634), compiled in `lean-verifications`
 | named map | `For $c\in[0,1]$, the corresponding rank map $\zeta_c:[0,1]\to[0,1]$ reads \[…\]` |
 | notion of the vocabulary | `Lebesgue measure on $[0,1]$ is denoted by $\mathrm{Leb}$.` |
 | relation | `We say that a copula $C$ is \emph{supported on the graph} of a Borel measurable $f:[0,1]\to[0,1]$ if $C(u,v)=…$ for all $u,v\in[0,1]$.` |
+| class of the vocabulary | `Let $\CC$ denote the class of bivariate copulas.`, `We denote by $\mathcal{C}$ the set of bivariate copulas.` |
+| two quantities at once | `For a copula $C$, Spearman's rho and Gini's gamma are \begin{equation}\rho(C)\coloneqq…,\qquad\gamma(C)\coloneqq….\end{equation}` |
+| constants | `Set $r_0\coloneqq\frac{144+9\sqrt6}{500}\approx0.33209$.`, `Define \begin{equation}d_0\coloneqq…,\qquad\Delta_0\coloneqq….\end{equation}` |
+| a named set | `The exact region between Spearman's rho and Gini's gamma is \begin{equation}\Om\coloneqq\{(\rho(C),\gamma(C)):C\in\CC\}.\end{equation}` |
+| a maximum | `For $g\in[-1,1]$, set \begin{align}\rhoup(g)\coloneqq\max\{\rho(C):C\in\CC,\ \gamma(C)=g\}.\end{align}` (a definite description: well defined when the maximum exists) |
 | law of a construction | `For a Borel measurable $T:[0,1]\to[0,1]$, let $\gamma_T$ denote the law of $(X,T(X))$ for $X$ uniformly distributed on $[0,1]$.` |
 
 ## Claims
@@ -84,6 +96,10 @@ citations.
 | derivative | `whose derivative $1-(1+r)^{1/3}$ is positive for $r<0$` |
 | relation | `$D_{1/2}$ is supported on the graph of the tent map $u\mapsto\min\{2u,2-2u\}$` |
 | transformation | `the map $C\mapsto\widehat C$ sends $\nu-\rho$ to $\rho-\nu$ by \eqref{eq:survival-transform}` |
+| condition | `If $-1\le g\le g_*$, then \begin{equation}\rhoup(g)=\frac{144+420g+(9+65g)\sqrt{6-10g}}{500}.\end{equation}` |
+| maximum of a quantity | `Then \begin{equation}\max_{C\in\CC}|\rho(C)-\gamma(C)|=\Delta_0.\end{equation}` |
+| image sets | `\{\rho(C):C\in\CC,\ \gamma(C)=0\}=[-r_0,r_0]` |
+| extrema at a fixed value | `For every $n\in[-1,1]$, the maximum $\Lambda(n)$ and the minimum $\Lambda^{-1}(n)$ of $\nu(C^\top)$ over all copulas $C$ with $\nu(C)=n$ are each attained by exactly one copula.` |
 
 The readings are fixed and documented next to each construction in
 `Proofread/Grammar.lean` (parsing) and `Proofread/Doc.lean` (meaning). Run
