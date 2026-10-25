@@ -126,12 +126,34 @@ where
     | .cases c v r => v.tex cs gs ls ++ "&" ++ c.tex cs gs ls ++ "\\\\" ++ cases r
     | _ => ""
 
+/-- A phrase as text: words separated by spaces, hyphens joined (`left-tail`). -/
+def phraseText (ws : List Codes) : String :=
+  let parts := ws.map Codes.toString
+  (parts.zip ((none :: parts.map some).take parts.length)).foldl (fun acc (w, prev) =>
+    if acc.isEmpty || w == "-" || prev == some "-" then acc ++ w else acc ++ " " ++ w) ""
+
+/-- The abbreviation among the names of a definition (`LTD`, beside
+`left-tail decreasing`): one short word, next to a name of several words. Words are
+read in lower case, so it is set in capitals. -/
+def abbreviation? (named : List (List Codes)) : Option String :=
+  if named.any (·.length ≥ 2) then
+    named.findSome? fun ws => match ws with
+      | [w] => let s := Codes.toString w
+        if s.length ≤ 6 then some (s.map Char.toUpper) else none
+      | _ => none
+  else none
+
+/-- The symbol of each definition: its key, or for a definition named by a phrase
+its abbreviation (`\operatorname{LTD}`), its word, or its phrase set as text. -/
 def Doc.globNames (d : Doc) : List String :=
   (d.globs.zip (List.range d.globs.length)).map fun (g, i) =>
     if g.key.isEmpty then
-      match d.names.find? (·.2 == i) with
-      | some (ws, _) => "\\operatorname{" ++ String.intercalate "\\," (ws.map Codes.toString) ++ "}"
-      | none => s!"\\mathrm\{op}_\{{i}}"
+      let named := (d.names.filter (·.2 == i)).map (·.1)
+      match abbreviation? named, named.head? with
+      | some a, _ => "\\operatorname{" ++ a ++ "}"
+      | none, some [w] => "\\operatorname{" ++ Codes.toString w ++ "}"
+      | none, some ws => "\\text{" ++ phraseText ws ++ "}"
+      | none, none => s!"\\mathrm\{op}_\{{i}}"
     else Codes.toString g.key
 
 /-- A Lean-identifier name for a definition: from the phrase that introduced it
@@ -165,10 +187,30 @@ def defNameRaw (d : Doc) (i : Nat) : String :=
   else if key.endsWith "^+" || key.endsWith "_+" then clean key ++ "Plus"
   else clean key
 
+/-- Names that `#proofread_article`, `#proofread_semantics` and `#proofread_certify`
+declare in an article's namespace. -/
+def reservedNames : List String :=
+  ["G", "assembled", "b", "blocks", "bodyLine", "certificate", "claim", "claimCount", "claimRanks",
+   "compiled", "definitionCount", "doc", "env", "envs", "envsEq", "finished", "lex", "lexSegmented",
+   "macros", "mode", "model", "next", "paragraphs", "preamble", "ranAll", "ranChain", "rankedOk",
+   "segFinished", "sentences", "sentencesRaw", "sentsSplit", "source", "sourceHash", "start", "t",
+   "verifiedClaims", "vocab"]
+
+/-- Prefixes of the numbered names they declare (`claim3`, `wellDefined0`, …). -/
+def generatedPrefixes : List String :=
+  ["claim", "meaningful", "obligation", "wellDefined", "welldef", "holds", "verified", "refuted", "lex",
+   "defined", "proof", "refute"]
+
+def isReservedName (n : String) : Bool :=
+  reservedNames.contains n || generatedPrefixes.any fun p =>
+    n.startsWith p && n.length > p.length && (n.drop p.length).all Char.isDigit
+
 /-- The Lean name of definition `i`: its symbol, or its phrase, made unique by the
 definition's index when an earlier definition has the same name. -/
 def defName (d : Doc) (i : Nat) : String :=
   let n := defNameRaw d i
-  if (List.range i).any (fun j => defNameRaw d j == n) then s!"{n}{i}" else n
+  let n := if (List.range i).any (fun j => defNameRaw d j == n) then s!"{n}{i}" else n
+  -- a symbol whose name the commands use for themselves (`G`) gets a suffix
+  if isReservedName n then n ++ "Def" else n
 
 end Proofread

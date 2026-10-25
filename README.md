@@ -96,10 +96,17 @@ The same source gives the two readable outputs:
   article from its source with the status of every sentence and, for each
   claim, its formal reading, Lean statement, premises and justification.
 
-[`examples/Demo`](examples/Demo) is the note of the guide (`draft.tex` and the
-certified `article.tex`), [`tests/Refuted`](tests/Refuted) the same note with
-its theorem refuted, and [`examples/Squares`](examples/Squares) the smallest
-complete example.
+The examples are short papers in the usual style, each certified by CI:
+
+* [`examples/Demo`](examples/Demo), the note of the guide (`draft.tex` and the
+  certified `article.tex`), and [`tests/Refuted`](tests/Refuted), the same note
+  with its theorem refuted;
+* [`examples/Means`](examples/Means), the harmonic, geometric and arithmetic
+  mean of two numbers, with symbols defined inside a theorem, in a
+  `where`-clause and in apposition;
+* [`examples/TailDependence`](examples/TailDependence), tail monotone copulas
+  are positively quadrant dependent, with the notions (LTD, RTI, PQD) defined
+  in the running text (`--vocab unitsquare`).
 
 ## Documentation
 

@@ -93,6 +93,32 @@ rho and Gini's gamma* (arXiv:2609.19890), compiled in `lean-verifications`
 | the variable of a result or a proof | `Let $w\in[\frac12,1)$.` (in a proof, `Let $x\in(0,\infty)$. Then $\frac{(x-1)^2}{x}\ge0$.` binds `x` in the later steps of the proof) |
 | law of a construction | `For a Borel measurable $T:[0,1]\to[0,1]$, let $\gamma_T$ denote the law of $(X,T(X))$ for $X$ uniformly distributed on $[0,1]$.` |
 
+## Definitions in the running text
+
+A paper defines most of its notation in passing: a notion in the middle of a
+paragraph, a symbol in the statement of the theorem that uses it, an
+abbreviation after a `where`. Proofread reads these where they stand.
+
+| Form | Example |
+| --- | --- |
+| a notion of an object | `We call a copula $C$ \emph{positively quadrant dependent} (\emph{PQD}) if $C(u,v)\ge uv$ for all $u,v\in[0,1]$.` (the abbreviation in parentheses is optional, and the notion may then be used by either name) |
+| a notion by a monotone map | `A copula $C$ is called \emph{left-tail decreasing} (\emph{LTD}) if, for every $v\in[0,1]$, the map \begin{equation}u\longmapsto\frac{C(u,v)}{u},\qquad u\in(0,1],\end{equation} is non-increasing.` |
+| the same subject again | `Similarly, $C$ is called \emph{right-tail increasing} (\emph{RTI}) if …` (`$C$` is the copula of the previous notion) |
+| using a notion | `Every LTD copula is PQD.`, `Let $C$ be an LTD copula, and let $u,v\in[0,1]$.`, `$C$ is LTD`, `both LTD and RTI` |
+| symbols inside a result | `Let $a,b\in(0,\infty)$, and let $A\coloneqq\frac{a+b}{2}$, $G\coloneqq\sqrt{ab}$ and $H\coloneqq\frac{2ab}{a+b}$. Then $H\le G\le A$.` (the symbols belong to the result and its proof, and depend on `a` and `b`) |
+| `where`-clause | `Then $\frac{a+b}{2}-\sqrt{ab}=\frac{d^2}{2}$, where $d\coloneqq\sqrt a-\sqrt b$.` |
+| in apposition | `For $a,b\in(0,\infty)$, the quadratic mean $Q\coloneqq\sqrt{\frac{a^2+b^2}{2}}$ is at least the arithmetic mean $\frac{a+b}{2}$.` |
+
+A notion is a property of the objects of a class, and its definition is its
+only meaning: `LTD(C)` unfolds to the condition after "if". A monotone map is
+`non-increasing`, `non-decreasing`, `strictly increasing` or `strictly
+decreasing` on the domain written after it (`u\in(0,1]`). A bare `increasing`
+is not read, because papers use it in both senses. A symbol defined inside a
+result (`A`, `G`, `H`) is not visible after the result and its proof, so the
+next theorem may define its own `A`. A notion whose condition needs words the
+vocabulary does not have yet (the Markov kernel of a copula, for *stochastically
+increasing*) stays prose, and so do the sentences that use it.
+
 ## Claims
 
 A claim sentence is an optional discourse marker ("Hence", "In particular",
@@ -119,6 +145,11 @@ citations.
 | an inequality on a square | `Then every $(x,z)\in[0,1]^2$ satisfies \begin{equation}\varphi_w(x)+\psi_w(z)\ge d_{\kappa_w}(x,z).\end{equation}` |
 | sharpness | `Both constants are sharp.` (after a claim `a\le c` about every element of a domain: for every `ε > 0` some element has `c - a < ε`) |
 | shape | `Moreover, $\Om$ is compact, convex and centrally symmetric, and $\rhoup$ is continuous, concave and strictly increasing.` (a function on the domain its definition states) |
+| comparison in words | `$Q$ is at least the arithmetic mean $\frac{a+b}{2}$`, `is at most`, `is less than`, `is greater than`, `is equal to`, `does not exceed` |
+| if and only if | `Moreover, $G=A$ if and only if $a=b$.` |
+| several facts | `We have $(\sqrt a)^2=a$, $(\sqrt b)^2=b$ and $\sqrt a\sqrt b=\sqrt{ab}$.` (each fact is a claim of the same sentence) |
+| facts used by a step | `Since $G\le A$ and $G>0$, it follows that $H=G\cdot\frac{G}{A}\le G$.` (the facts after "Since" are premises of the step, so the step may use them) |
+| a reason in words | `Moreover, $\sqrt a=\sqrt b$ if and only if $a=b$, since the square root is injective.` (the reason is prose, the claim before it is checked) |
 | equality sets | `If $w>\frac12$, equality holds exactly on $S_w$, and if $w=\frac12$, it holds exactly on $S_{1/2}\cup([\frac12,1]\times\{\frac12\})$.`, `…, and equality holds exactly when $x=R_b(z)$.`, `For every $x\in(0,\infty)$, $f(x)\ge2$. Equality holds exactly when $x=1$.` (about the preceding inequality, for every point of its domain) |
 
 The readings are fixed and documented next to each construction in

@@ -24,10 +24,17 @@ name = "proofread"
 root = "ProofreadCli"
 
 [[lean_lib]]
-# The smallest complete example: an article compiled, verified and certified.
-name = "Squares"
+# A short paper on the harmonic, geometric and arithmetic mean: definitions inside a
+# result, in a claim and after it.
+name = "Means"
 srcDir = "examples"
-globs = ["Squares.+"]
+globs = ["Means.+"]
+
+[[lean_lib]]
+# A short copula paper: notions defined in the running text (LTD, RTI, PQD).
+name = "TailDependence"
+srcDir = "examples"
+globs = ["TailDependence.+"]
 
 [[lean_lib]]
 # The demonstration article of docs/getting-started.md.

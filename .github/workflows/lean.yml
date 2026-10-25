@@ -16,9 +16,11 @@ jobs:
           test: 'false'
           use-mathlib-cache: 'true'
       - name: Build the checker and certify the example articles
-        run: lake build proofread Squares Demo Refuted
-      - name: Quick check of the example article
-        run: lake exe proofread check examples/Squares/article.tex --claims --prose
+        run: lake build proofread Demo Means TailDependence Refuted
+      - name: Quick check of the example articles
+        run: |
+          lake exe proofread check examples/Means/article.tex --claims --prose
+          lake exe proofread check examples/TailDependence/article.tex --vocab unitsquare --claims --prose
       - name: The draft of the getting-started guide gives the findings the guide shows
         run: |
           lake exe proofread check examples/Demo/draft.tex > "$RUNNER_TEMP/draft.check.txt" || true
@@ -28,8 +30,9 @@ jobs:
           python-version: "3.12"
       - name: Every claim of the examples is verified
         run: |
-          python scripts/proofread_diagnostics.py examples/Squares/article.proofread.json --strict --verified
-          python scripts/proofread_diagnostics.py examples/Demo/article.proofread.json --strict --verified
+          for a in Demo Means TailDependence; do
+            python scripts/proofread_diagnostics.py examples/$a/article.proofread.json --strict --verified
+          done
       - name: The refuted theorem is reported false, and the claims resting on it unverified
         run: |
           if python scripts/proofread_diagnostics.py tests/Refuted/article.proofread.json > "$RUNNER_TEMP/refuted.txt"; then exit 1; fi

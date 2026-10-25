@@ -1,0 +1,64 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{proofread}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\title{The harmonic, geometric and arithmetic mean of two numbers}
+\author{Proofread example}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+For two positive numbers, the harmonic mean is at most the geometric mean, and the geometric mean is at most the arithmetic mean.
+The geometric and the arithmetic mean agree exactly when the two numbers do.
+We give the short classical proof, in which every step is derived from what it cites.
+\end{abstract}
+
+\section{Introduction}
+
+The inequality between the arithmetic and the geometric mean is one of the most frequently used inequalities in analysis, and the monographs \cite{hardy1952inequalities,steele2004cauchy} discuss it at length.
+For two numbers it reduces to the fact that a square is nonnegative.
+The inequality for the harmonic mean then follows from a short computation.
+Theorem~\ref{thm:means} states both, together with the case of equality.
+
+\section{The three means}
+
+\begin{lemma}\label{lem:square}
+Let $a,b\in(0,\infty)$.
+Then $\frac{a+b}{2}-\sqrt{ab}=\frac{d^2}{2}$, where $d\coloneqq\sqrt a-\sqrt b$.
+\end{lemma}
+
+\begin{proof}
+We have $(\sqrt a)^2=a$, $(\sqrt b)^2=b$ and $\sqrt a\sqrt b=\sqrt{ab}$.
+Hence $\frac{d^2}{2}=\frac{a-2\sqrt{ab}+b}{2}=\frac{a+b}{2}-\sqrt{ab}$.
+\end{proof}
+
+\begin{theorem}\label{thm:means}
+Let $a,b\in(0,\infty)$, and let $A\coloneqq\frac{a+b}{2}$, $G\coloneqq\sqrt{ab}$ and $H\coloneqq\frac{2ab}{a+b}$.
+Then $H\le G\le A$.
+Moreover, $G=A$ if and only if $a=b$.
+\end{theorem}
+
+\begin{proof}
+By Lemma~\ref{lem:square}, $A-G=\frac{(\sqrt a-\sqrt b)^2}{2}\ge0$.
+Hence $G\le A$, and $G=A$ if and only if $\sqrt a=\sqrt b$.
+Moreover, $\sqrt a=\sqrt b$ if and only if $a=b$, since the square root is injective.
+Finally, $H=\frac{G^2}{A}$.
+Since $G\le A$ and $G>0$, it follows that $H=G\cdot\frac{G}{A}\le G$.
+\end{proof}
+
+\begin{remark}\label{rem:quadratic}
+For $a,b\in(0,\infty)$, the quadratic mean $Q\coloneqq\sqrt{\frac{a^2+b^2}{2}}$ is at least the arithmetic mean $\frac{a+b}{2}$.
+\end{remark}
+
+\begin{thebibliography}{2}
+\bibitem{hardy1952inequalities} G.~H. Hardy, J.~E. Littlewood and G.~P\'olya, \emph{Inequalities}, 2nd ed., Cambridge University Press, 1952.
+\bibitem{steele2004cauchy} J.~M. Steele, \emph{The Cauchy--Schwarz Master Class}, Cambridge University Press, 2004.
+\end{thebibliography}
+
+\end{document}

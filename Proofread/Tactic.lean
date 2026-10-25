@@ -37,8 +37,8 @@ elab "intro_premises" : tactic => do
   loop 1000
 
 /-- `definedness [t₁, …]` proves a definedness condition (`meaningfulK`, `wellDefinedI`):
-a tree of `∧`, `→` and `∀` whose leaves are hypotheses, numeric side conditions
-or the given facts, and whose impossible branches (contradictory case
+a tree of `∧`, `→` and `∀` whose leaves are hypotheses, numeric side conditions,
+signs that `positivity` proves, or the given facts, and whose impossible branches (contradictory case
 conditions) are closed by `linarith` or `tauto`. -/
 elab "definedness" " [" ts:term,* "]" : tactic => do
   let leaf ← ts.getElems.foldlM (fun acc t => do
@@ -50,6 +50,7 @@ elab "definedness" " [" ts:term,* "]" : tactic => do
     | (intro _; try casesm* _ ∧ _)
     | refine ⟨?_, ?_⟩
     | (linarith; done)
+    | (positivity; done)
     -- a branch whose case conditions contradict each other
     | (exfalso; tauto; done)
     -- uncovered cases: the negated case conditions contradict the domain

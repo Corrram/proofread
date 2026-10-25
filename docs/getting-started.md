@@ -77,10 +77,21 @@ name becomes the Lean namespace. Load the usual packages and `proofread.sty`
 
 Write as you always do, in the style of [Writing for Proofread](writing.md):
 define every symbol before you use it, with `\coloneqq`, give every quantifier,
-and cite what a proof step uses. Here is the body of the draft (copy
+and cite what a proof step uses. Here is the draft after `\maketitle` (copy
 `examples/Demo/draft.tex` to `Note/article.tex` to follow along):
 
 ```latex
+\begin{abstract}
+We show that a positive number and its reciprocal never sum to less than two, and that the sum is smallest at one.
+The proof rests on an identity for the distance between the sum and two.
+\end{abstract}
+
+\section{Introduction}
+
+This bound is the inequality between the arithmetic and the geometric mean of a positive number and its reciprocal, a classical inequality treated at length in \cite{hardy1952inequalities}.
+We derive it directly from an identity, which also shows where the sum attains its minimum.
+Every claim of this note is verified in Lean with Proofread.
+
 \section{The bound}
 
 Define $f:\mathbb{R}\to\mathbb{R}$ by $f(x)\coloneqq x+\frac1x$.
@@ -111,7 +122,16 @@ The function $f$ attains its minimum on $(0,\infty)$ at $1$.
 \begin{proof}
 By Theorem~\ref{thm:bound}, $f(1)=2\le f(x)$ for every $x\in(0,\infty)$.
 \end{proof}
+
+\begin{thebibliography}{1}
+\bibitem{hardy1952inequalities} G.~H. Hardy, J.~E. Littlewood and G.~P\'olya, \emph{Inequalities}, 2nd ed., Cambridge University Press, 1952.
+\end{thebibliography}
 ```
+
+The abstract, the introduction and the references have no mathematical
+reading, so they are prose: the reader shows them, and they assert nothing
+checked. A sentence there that does have a reading, such as a definition, is
+compiled like any other.
 
 ## 3. Check while you write
 
@@ -123,17 +143,17 @@ The check runs in about a second and certifies nothing. It reads the article
 the way the kernel will:
 
 ```
-Note/article.tex:36:1: warning: sentence not compiled (undefined symbol: g); it asserts nothing checked
-Note/article.tex:40:1: warning: corollary sentence without a mathematical reading: The function $f$ attains its minimum on $(0,\infty)$ at $1$.
+Note/article.tex:46:1: warning: sentence not compiled (undefined symbol: g); it asserts nothing checked
+Note/article.tex:50:1: warning: corollary sentence without a mathematical reading: The function $f$ attains its minimum on $(0,\infty)$ at $1$.
 Note/article.tex: 1 definitions, 5 claims
-  text: 1 compiled, 0 failed, 5 prose (of 6)
+  text: 1 compiled, 0 failed, 6 prose (of 7)
   results: 2 compiled, 0 failed, 1 prose (of 3)
   proofs: 5 compiled, 1 failed, 0 prose (of 6)
-  all: 8 compiled, 1 failed, 6 prose (of 15)
+  all: 8 compiled, 1 failed, 7 prose (of 16)
 ```
 
-* **Line 36** uses `g`, which nothing defines. It is a typo for `f`.
-* **Line 40** is the whole statement of the corollary, and the grammar has no
+* **Line 46** uses `g`, which nothing defines. It is a typo for `f`.
+* **Line 50** is the whole statement of the corollary, and the grammar has no
   reading of "attains its minimum on … at …". Unread, the corollary would assert
   nothing checked. Say it as an inequality:
   `For every $x\in(0,\infty)$, $f(1)\le f(x)$.`
@@ -143,14 +163,14 @@ are what Lean will prove, so read them:
 
 ```
 lake exe proofread check Note/article.tex --claims
-Note/article.tex:18:1: info: defines f (f)
-Note/article.tex:21:1: info: claim 0: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=\frac{{(x-1)}^{2}}{x}
-Note/article.tex:26:1: info: claim 1: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=x+\frac{1}{x}-2\land x+\frac{1}{x}-2=\frac{{x}^{2}-2\,x+1}{x}\land \frac{{x}^{2}-2\,x+1}{x}=\frac{{(x-1)}^{2}}{x}
-Note/article.tex:30:1: info: claim 2: \forall x\in \mathbb{R},\ 0<x\Rightarrow 2<f(x)
-Note/article.tex:35:1: info: claim 3: \forall x\in \mathbb{R},\ 0<x\Rightarrow 0\le \frac{{(x-1)}^{2}}{x}
-Note/article.tex:36:1: info: claim 4: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=\frac{{(x-1)}^{2}}{x}\land 0\le \frac{{(x-1)}^{2}}{x}
-Note/article.tex:40:1: info: claim 5: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(1)\le f(x)
-Note/article.tex:44:1: info: claim 6: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(1)=2\land 2\le f(x)
+Note/article.tex:28:1: info: defines f (f)
+Note/article.tex:31:1: info: claim 0: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=\frac{{(x-1)}^{2}}{x}
+Note/article.tex:36:1: info: claim 1: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=x+\frac{1}{x}-2\land x+\frac{1}{x}-2=\frac{{x}^{2}-2\,x+1}{x}\land \frac{{x}^{2}-2\,x+1}{x}=\frac{{(x-1)}^{2}}{x}
+Note/article.tex:40:1: info: claim 2: \forall x\in \mathbb{R},\ 0<x\Rightarrow 2<f(x)
+Note/article.tex:45:1: info: claim 3: \forall x\in \mathbb{R},\ 0<x\Rightarrow 0\le \frac{{(x-1)}^{2}}{x}
+Note/article.tex:46:1: info: claim 4: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=\frac{{(x-1)}^{2}}{x}\land 0\le \frac{{(x-1)}^{2}}{x}
+Note/article.tex:50:1: info: claim 5: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(1)\le f(x)
+Note/article.tex:54:1: info: claim 6: \forall x\in \mathbb{R},\ 0<x\Rightarrow f(1)=2\land 2\le f(x)
 ```
 
 Every sentence of the results and proofs now has a reading. `--prose` also
@@ -192,7 +212,7 @@ The four files never need to be rewritten by hand except `Proofs.lean`:
 Each stub states the claim, where it comes from and what it rests on:
 
 ```lean
-/-- Claim 2, statement (theorem at line 30; premises: claim 3, claim 4, claim 0):
+/-- Claim 2, statement (theorem at line 40; premises: claim 3, claim 4, claim 0):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow 2<f(x)` -/
 theorem proof2 : obligation2 := by
   intro_premises
@@ -301,9 +321,9 @@ PDF and the web reader all show it:
 
 ```
 python .lake/packages/proofread/scripts/proofread_diagnostics.py Note/article.proofread.json
-Note/article.tex:30:1: error: statement (claim 2) is false as stated: refuted by Note.Proofs.refute2
-Note/article.tex:40:1: warning: statement (claim 5) compiled but not verified: it rests on claim 2, which is refuted
-Note/article.tex:44:1: warning: proof step (claim 6) compiled but not verified: it rests on claim 2, which is refuted
+Note/article.tex:40:1: error: statement (claim 2) is false as stated: refuted by Note.Proofs.refute2
+Note/article.tex:50:1: warning: statement (claim 5) compiled but not verified: it rests on claim 2, which is refuted
+Note/article.tex:54:1: warning: proof step (claim 6) compiled but not verified: it rests on claim 2, which is refuted
 ```
 
 ![The PDF with \usepackage[status]{proofread}: Lemma 1 is derived, Theorem 2 is marked false, Corollary 3 is compiled but not verified](images/demo-pdf-refuted.png)
@@ -324,7 +344,7 @@ Every claim of the note is now derived in the text: each sentence of every proof
 follows from what it cites, and each result from its proof.
 [`examples/Demo/Proofs.lean`](../examples/Demo/Proofs.lean) has all the proofs.
 
-![The certified note: every result is marked derived](images/demo-pdf.png)
+![The certified note as a paper: abstract, introduction, the three results, each marked derived, and the references](images/demo-pdf.png)
 
 ## 8. Read and share the result
 
@@ -377,7 +397,7 @@ verified or is refuted.
 | `sentence not compiled (undefined symbol: …)` | Define the symbol earlier, or fix the typo. |
 | `… sentence without a mathematical reading` | Rephrase with a construction from [Writing for Proofread](writing.md). In a proof, prose is fine: it asserts nothing. |
 | `the article changed after …` or a stale pin | `lake exe proofread prepare article.tex --lean Compiled.lean`, then build. |
-| `unsolved goals` in `definedI` or `meaningfulK` | A term is not defined everywhere it is used. Restrict the domain, or give `definedness [h₁, …]` the facts it needs. |
+| `unsolved goals` in `definedI` or `meaningfulK` | A term is not defined everywhere it is used. Restrict the domain, or give `definedness [h₁, …]` the facts it needs. It finds hypotheses, numeric side conditions and signs that `positivity` proves, but not facts about your definitions, such as `A x y ≠ 0` for a mean `A`. |
 | `claim K is derived in the text from its citations, but its justification … uses …` | The proof uses a result the sentence does not cite. Cite it in the text. |
 | `linarith failed`, or any proof that will not close | Check the reading (`--claims`). If the claim is false, prove `refuteK`. |
 

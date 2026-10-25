@@ -4,14 +4,24 @@
 \newtheorem{lemma}{Lemma}
 \newtheorem{theorem}[lemma]{Theorem}
 \newtheorem{corollary}[lemma]{Corollary}
+
 \title{A number and its reciprocal}
 \author{Proofread demo}
+\date{}
+
 \begin{document}
 \maketitle
 
-A positive number and its reciprocal never sum to less than two.
-This note is the demonstration article of Proofread.
-Every sentence of its results and proofs is compiled to Lean, and every claim is verified.
+\begin{abstract}
+We show that a positive number and its reciprocal never sum to less than two, and that the sum is smallest at one.
+The proof rests on an identity for the distance between the sum and two.
+\end{abstract}
+
+\section{Introduction}
+
+This bound is the inequality between the arithmetic and the geometric mean of a positive number and its reciprocal, a classical inequality treated at length in \cite{hardy1952inequalities}.
+We derive it directly from an identity, which also shows where the sum attains its minimum.
+Every claim of this note is verified in Lean with Proofread.
 
 \section{The bound}
 
@@ -44,6 +54,8 @@ For every $x\in(0,\infty)$, $f(1)\le f(x)$.
 By Theorem~\ref{thm:bound}, $f(1)=2\le f(x)$ for every $x\in(0,\infty)$.
 \end{proof}
 
-The bound is the inequality between the arithmetic and the geometric mean of a positive number and its reciprocal.
+\begin{thebibliography}{1}
+\bibitem{hardy1952inequalities} G.~H. Hardy, J.~E. Littlewood and G.~P\'olya, \emph{Inequalities}, 2nd ed., Cambridge University Press, 1952.
+\end{thebibliography}
 
 \end{document}

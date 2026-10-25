@@ -24,7 +24,7 @@ theorem defined0 : wellDefined0 := by
   unfold wellDefined0
   definedness []
 
-/-- Claim 0, statement (lemma at line 21; premises: claim 1):
+/-- Claim 0, statement (lemma at line 31; premises: claim 1):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=\frac{{(x-1)}^{2}}{x}` -/
 theorem proof0 : obligation0 := by
   intro_premises
@@ -32,7 +32,7 @@ theorem proof0 : obligation0 := by
   obtain ⟨h1, h2, h3⟩ := c1 x hx
   rw [h1, h2, h3]
 
-/-- Claim 1, proof step (proof at line 26; no premises):
+/-- Claim 1, proof step (proof at line 36; no premises):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=x+\frac{1}{x}-2\land x+\frac{1}{x}-2=\frac{{x}^{2}-2\,x+1}{x}\land \frac{{x}^{2}-2\,x+1}{x}=\frac{{(x-1)}^{2}}{x}` -/
 theorem proof1 : obligation1 := by
   intro_premises
@@ -40,7 +40,7 @@ theorem proof1 : obligation1 := by
   field_simp
   ring
 
-/-- Claim 2, statement (theorem at line 30; premises: claim 3, claim 4, claim 0):
+/-- Claim 2, statement (theorem at line 40; premises: claim 3, claim 4, claim 0):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow 2<f(x)` -/
 theorem refute2 : meaningful2 ∧ ¬ claim2 := by
   refine ⟨by unfold meaningful2; definedness [], fun h => ?_⟩
@@ -48,20 +48,20 @@ theorem refute2 : meaningful2 ∧ ¬ claim2 := by
   have h1 := h 1 one_pos
   norm_num [f] at h1
 
-/-- Claim 3, proof step (proof at line 35; no premises):
+/-- Claim 3, proof step (proof at line 45; no premises):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow 0\le \frac{{(x-1)}^{2}}{x}` -/
 theorem proof3 : obligation3 := by
   intro_premises
   refine ⟨by unfold meaningful3; definedness [], fun x hx => ?_⟩
   positivity
 
-/-- Claim 4, proof step (proof at line 36; premises: claim 0, claim 3):
+/-- Claim 4, proof step (proof at line 46; premises: claim 0, claim 3):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow f(x)-2=\frac{{(x-1)}^{2}}{x}\land 0\le \frac{{(x-1)}^{2}}{x}` -/
 theorem proof4 : obligation4 := by
   intro_premises
   exact ⟨by unfold meaningful4; definedness [], fun x hx => ⟨c0 x hx, c3 x hx⟩⟩
 
-/-- Claim 5, statement (corollary at line 40; premises: claim 6, claim 2):
+/-- Claim 5, statement (corollary at line 50; premises: claim 6, claim 2):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow f(1)\le f(x)` -/
 theorem proof5 : obligation5 := by
   intro_premises
@@ -70,7 +70,7 @@ theorem proof5 : obligation5 := by
   rw [h1]
   exact h2
 
-/-- Claim 6, proof step (proof at line 44; premises: claim 2):
+/-- Claim 6, proof step (proof at line 54; premises: claim 2):
 `\forall x\in \mathbb{R},\ 0<x\Rightarrow f(1)=2\land 2\le f(x)` -/
 theorem proof6 : obligation6 := by
   intro_premises

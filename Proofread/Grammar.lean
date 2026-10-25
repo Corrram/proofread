@@ -158,7 +158,8 @@ def wMarkers : List (List Codes) :=
   [[w!"to", w!"make", w!"this", w!"precise"], [w!"consequently"], [w!"hence"], [w!"in", w!"particular"],
    [w!"then"], [w!"thus"], [w!"therefore"], [w!"indeed"], [w!"moreover"], [w!"furthermore"],
    [w!"in", w!"addition"], [w!"finally"], [w!"again"], [w!"conversely"], [w!"similarly"],
-   [w!"in", w!"other", w!"words"], [w!"that", w!"is"]]
+   [w!"in", w!"other", w!"words"], [w!"that", w!"is"], [w!"we", w!"have"], [w!"it", w!"follows", w!"that"],
+   [w!"we", w!"obtain"], [w!"note", w!"that"], [w!"we", w!"see", w!"that"]]
 
 /-- Discourse markers have no content of their own (`For the minimum` sets a topic). -/
 inductive Topic where
@@ -172,11 +173,12 @@ def marker (cs : List Chunk) : Topic × List Chunk :=
   match kw [w!"for", w!"the", w!"maximum"] cs with
   | some r => (.maximum, optPunct 44 r)
   | none =>
-    let rec tryAll : List (List Codes) → Topic × List Chunk
-      | [] => (.none, cs)
-      | m :: ms => match kw m cs with
-        | some r => (.none, optPunct 44 r)
-        | none => tryAll ms
+    -- up to two markers in a row (`Hence, it follows that`)
+    let one (cs : List Chunk) : Option (List Chunk) := wMarkers.findSome? fun m => (kw m cs).map (optPunct 44 ·)
+    let tryAll (_ : List (List Codes)) : Topic × List Chunk :=
+      match one cs with
+      | some r => (.none, (one r).getD r)
+      | none => (.none, cs)
     -- a topic in words only: `For the second region, whose boundary has two regimes,`
     match kw [w!"for", w!"the"] cs with
     | some r =>
@@ -328,14 +330,25 @@ inductive Clause where
   the preceding claim about every element of a domain cannot be improved: for every
   `ε > 0`, some element has `b - a < ε`. -/
   | sharp
+  /-- `$x$ is NAME[, NAME] and|or NAME`: notions the article defines (`disj`: `or`). -/
+  | notions (s : MT) (names : List (List Codes)) (disj : Bool)
+  /-- `every NP is NAME [and|or NAME]`. -/
+  | everyIs (np : List Chunk) (names : List (List Codes)) (disj : Bool)
+  /-- `$φ$ if and only if $ψ$`. -/
+  | iff (p q : MT)
+  /-- `[the WORDS] $X$ is at most [the WORDS] $Y$` (at least, less than, greater than,
+  equal to); either side may define its symbol (`the geometric mean $G\coloneqq\sqrt{ab}$`). -/
+  | compare (lhs : MT) (rel : Rel) (rhs : MT)
   deriving Repr, Inhabited
 
-/-- A clause with the citations that justify it, and its own binders
-(`…, and for $b\in B$, CLAUSE`). -/
+/-- A clause with the citations that justify it, its own binders
+(`…, and for $b\in B$, CLAUSE`) and the definitions of a trailing `where`
+(`…, where $g(x)\coloneqq x-1$`). -/
 structure CClause where
   cites : List Codes
   clause : Clause
   binds : List Bind := []
+  defs : List MT := []
   deriving Repr, Inhabited
 
 def subj (cs : List Chunk) : Option (Subj × List Chunk) :=
@@ -424,11 +437,66 @@ def adjectiveList : Nat → List Chunk → List (List Codes) → Option (List (L
       if (adjective r').isSome then adjectiveList f r' acc else some (acc.reverse, r)
     | none => some (acc.reverse, r)
 
+/-- Words that end the name of a notion. -/
+def notionStops : List Codes :=
+  [w!"if", w!"and", w!"or", w!"for", w!"of", w!"on", w!"by", w!"with", w!"then", w!"is", w!"are",
+   w!"in", w!"to", w!"at", w!"from", w!"whenever", w!"where", w!"when", w!"since", w!"a", w!"an",
+   w!"the", w!"every", w!"each", w!"all", w!"called", w!"not", w!"so", w!"whereas", w!"as", w!"both",
+   w!"either", w!"neither"]
+
+/-- The name of a notion: words and hyphens (`left-tail decreasing`, the hyphen as `-`). -/
+def nameWords : Nat → List Chunk → List Codes → List Codes × List Chunk
+  | 0, cs, acc => (acc.reverse, cs)
+  | f + 1, .w v :: cs, acc =>
+    if notionStops.contains v then (acc.reverse, .w v :: cs) else nameWords f cs (v :: acc)
+  | f + 1, .p 45 :: cs, acc =>
+    if acc.isEmpty then ([], .p 45 :: cs) else nameWords f cs (w!"-" :: acc)
+  | _, cs, acc => (acc.reverse, cs)
+
+/-- The end of a clause: the period, a comma, or a trailing citation. -/
+def clauseEnd (cs : List Chunk) : Bool :=
+  isEnd cs || (punct 44 cs).isSome || (kw [w!"by"] cs >>= cite).isSome
+
+/-- `NAME[, NAME] and|or NAME`, ending a clause; `or` makes a disjunction. -/
+def notionList (cs : List Chunk) : Option (List (List Codes) × Bool × List Chunk) := do
+  let (n1, r1) := nameWords 8 cs []
+  if n1.isEmpty then none else
+  match kw [w!"and"] r1 <|> kw [w!"or"] r1 with
+  | some r2 =>
+    let disj := (kw [w!"or"] r1).isSome
+    let (n2, r3) := nameWords 8 r2 []
+    if n2.isEmpty || !clauseEnd r3 then none else some ([n1, n2], disj, r3)
+  | none => if clauseEnd r1 then some ([n1], false, r1) else none
+
+/-- `[the WORDS] $X$`, possibly `$X\coloneqq e$`: a term named by a phrase. -/
+def namedTerm (cs : List Chunk) : Option (MT × List Chunk) :=
+  let r := match kw [w!"the"] cs with
+    | some r' => r'.dropWhile (fun c => match c with | .w _ | .p 45 => true | _ => false)
+    | none => cs
+  formula r
+
+/-- `is at most`, `is at least`, `is less than`, `is greater than`, `is equal to`,
+`does not exceed`, `equals`. -/
+def compareRel (cs : List Chunk) : Option (Rel × List Chunk) :=
+  ((kw [w!"is", w!"at", w!"most"] cs).map (.le, ·)) <|> ((kw [w!"does", w!"not", w!"exceed"] cs).map (.le, ·)) <|>
+  ((kw [w!"is", w!"at", w!"least"] cs).map (.ge, ·)) <|> ((kw [w!"is", w!"less", w!"than"] cs).map (.lt, ·)) <|>
+  ((kw [w!"is", w!"smaller", w!"than"] cs).map (.lt, ·)) <|> ((kw [w!"is", w!"greater", w!"than"] cs).map (.gt, ·)) <|>
+  ((kw [w!"is", w!"larger", w!"than"] cs).map (.gt, ·)) <|> ((kw [w!"is", w!"equal", w!"to"] cs).map (.eq, ·)) <|>
+  ((kw [w!"equals"] cs).map (.eq, ·))
+
 /-- One clause, without its citations. Must be followed by a clause boundary. -/
 def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
   -- It holds that DISPLAY
   match kw [w!"it", w!"holds", w!"that"] cs with
   | some r => do let (m, _, r') ← display r; some (.holds m, r')
+  | none =>
+  -- $φ$ if and only if $ψ$
+  match (do
+      let (p, r) ← formula cs
+      let r1 ← kw [w!"if", w!"and", w!"only", w!"if"] r
+      let (q, r2) ← formula r1
+      some (Clause.iff p q, r2)) with
+  | some res => some res
   | none =>
   -- equality holds exactly on $S$ | when $φ$; it holds exactly on $S$
   -- [both|the|this|these|all] constants|bounds|inequalities are sharp
@@ -447,6 +515,14 @@ def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
       let r1 ← kw [w!"is"] r
       let (adjs, r2) ← adjectiveList 6 r1 []
       some (Clause.adjectives m adjs, r2)) with
+  | some res => some res
+  | none =>
+  -- $X$ is NAME [and|or NAME]: notions of the article
+  match (do
+      let (m, r) ← formula cs
+      let r1 ← kw [w!"is"] r
+      let (names, disj, r2) ← notionList r1
+      some (Clause.notions m names disj, r2)) with
   | some res => some res
   | none =>
   match (do
@@ -536,7 +612,12 @@ def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
       let (np, r1) ← chunksUntil [w!"satisfies", w!"obeys"] r []
       let r2 ← kw [w!"satisfies"] r1 <|> kw [w!"obeys"] r1
       let (body, r3) ← formulaOrDisplay r2
-      some (.everyNP np body, r3))
+      some (.everyNP np body, r3)) <|>
+    (do
+      let (np, r1) ← chunksUntil [w!"is"] r []
+      let r2 ← kw [w!"is"] r1
+      let (names, disj, r3) ← notionList r2
+      some (.everyIs np names disj, r3))
   | none =>
   -- The maximum/minimum $F=m$ is attained only by SUBJ[, which REL]
   match kw [w!"the", w!"maximum"] cs, kw [w!"the", w!"minimum"] cs with
@@ -614,6 +695,14 @@ def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
     | some (ms, r') => some (.fact (.conj ms), r')
     | none => none
   | none =>
+  -- [the WORDS] $X$ is at most [the WORDS] $Y$
+  match (do
+      let (l, r) ← namedTerm cs
+      let (rel, r1) ← compareRel r
+      let (rr, r2) ← namedTerm r1
+      some (Clause.compare l rel rr, r2)) with
+  | some res => some res
+  | none =>
   -- SUBJ is the only N with $φ$ (and $ψ$)* | SUBJ is <words> of OBJ
   match subj cs with
   | some (s, r) =>
@@ -672,7 +761,7 @@ def cclause (cs : List Chunk) : Option (CClause × List Chunk) :=
     match kw [w!"gives"] r1 with
     | some r2 => do
       let (m, r3) ← formula r2
-      some (⟨pre ++ [l], .fact m, []⟩, r3)
+      some (⟨pre ++ [l], .fact m, [], []⟩, r3)
     | none => none
   | none => do
     -- a hypothesis about bound variables: `if $φ$, CLAUSE`
@@ -695,21 +784,51 @@ def cclause (cs : List Chunk) : Option (CClause × List Chunk) :=
     let (c, r1) ← clause r0
     let c := match hyp with | some m => Clause.ifThen m c | none => c
     let post := (kw [w!"by"] r1 >>= cite) <|> (kw [w!"as", w!"specified", w!"in"] r1 >>= cite)
-    match post with
-    | some (l, r2) => some (⟨pre ++ [l], c, bs⟩, r2)
-    | none => some (⟨pre, c, bs⟩, r1)
+    let (cites, r2) := match post with
+      | some (l, r2) => (pre ++ [l], r2)
+      | none => (pre, r1)
+    -- `…, where $g(x)\coloneqq x-1$ [and $h\coloneqq …$]`
+    match punct 44 r2 >>= kw [w!"where"] with
+    | some r3 => do
+      let (ds, r4) ← whereDefs 4 r3 []
+      some (⟨cites, c, bs, ds⟩, r4)
+    | none => some (⟨cites, c, bs, []⟩, r2)
+where
+  /-- Definitions `$X\coloneqq e$` separated by `,` and `and`. -/
+  whereDefs : Nat → List Chunk → List MT → Option (List MT × List Chunk)
+    | 0, _, _ => none
+    | f + 1, cs, acc => do
+      let (m, r) ← formula cs
+      match m with
+      | .chain _ ((.defeq, _) :: _) =>
+        let acc := m :: acc
+        match (punct 44 r >>= fun r' => (kw [w!"and"] r').getD r' |> some) <|> kw [w!"and"] r with
+        | some r' =>
+          match formula r' with
+          | some (.chain _ ((.defeq, _) :: _), _) => whereDefs f r' acc
+          | _ => some (acc.reverse, r)
+        | none => some (acc.reverse, r)
+      | _ => none
 
 /-- Clauses separated by `, and` / `, so`, ending with the final period. -/
 def clauses : Nat → List Chunk → List CClause → Option (List CClause)
   | 0, _, _ => none
   | f + 1, cs, acc => do
     let (c, r) ← cclause cs
+    -- a reason in words only (`…, since the square root is injective.`) asserts nothing
+    let r := match punct 44 r >>= kw [w!"since"] with
+      | some r' =>
+        let ws := r'.takeWhile (fun c => match c with | .w _ | .p 45 => true | _ => false)
+        if !ws.isEmpty && isEnd (r'.drop ws.length) then r'.drop ws.length else r
+      | none => r
     if isEnd r then some (c :: acc).reverse
     else
-      -- `, and`, `, so`, `, whereas`, or `and` between two formulas
+      -- `, and`, `, so`, `, whereas`, or `and` between two formulas, or `,` before a
+      -- formula (`$φ$, $ψ$ and $χ$`)
       let next := (do
         let r' ← punct 44 r
-        kw [w!"and"] r' <|> kw [w!"so"] r' <|> kw [w!"whereas"] r') <|> kw [w!"and"] r
+        kw [w!"and"] r' <|> kw [w!"so"] r' <|> kw [w!"whereas"] r' <|>
+          (match r' with | .m _ :: _ => some r' | _ => none)) <|> kw [w!"and"] r
       match next with
       | some r'' => clauses f r'' (c :: acc)
       | none => none
@@ -757,6 +876,21 @@ inductive DefPiece where
   | param (dom : MT) (m : MT)
   deriving Repr, Inhabited
 
+/-- Monotonicity of a map: `non-increasing`, `non-decreasing`, `strictly increasing`,
+`strictly decreasing`. (A plain `increasing` is ambiguous between the first two
+readings, so the grammar does not read it.) -/
+inductive Mono where
+  | nonincreasing | nondecreasing | increasing | decreasing
+  deriving Repr, Inhabited, DecidableEq
+
+/-- The condition of a notion the article defines. -/
+inductive NotionCond where
+  /-- `$φ$ [for all $u,v\in A$]` -/
+  | formula (f : MT) (binds : List Bind)
+  /-- `[for every $v\in A$,] the map $x\mapsto e$[, $x\in D$,] is non-increasing` -/
+  | mono (binds : List Bind) (map : MT) (mono : Mono)
+  deriving Repr, Inhabited
+
 inductive Sent where
   | defClass (sym : MT) (plural : List Codes) (np : List Chunk)
   | defIs (bind : Bind) (items : List DefItem)
@@ -785,6 +919,14 @@ inductive Sent where
   with derivatives DISPLAY`, where the display gives `f'(x)` (piecewise). -/
   | defDeriv (bind : Option Bind) (sets : List MT) (names : List MT) (dom cod : MT) (anchors : List MT)
       (derivs : MT) (labels : List Codes)
+  /-- `We call a NOUN $x$ NAME [(ABBR)] if COND.`, `[A NOUN] $x$ is called NAME [(ABBR)]
+  if COND.`, `$x$ is NAME (ABBR) if COND.`: a notion of the article. `subj` is the noun
+  phrase with its variable, or the variable alone (the subject of the previous notion). -/
+  | defNotion (subj : List Chunk) (name : List Codes) (abbr : List Codes) (cond : NotionCond)
+  /-- `Let $C$ be a NP[, and let $u,v\in A$][, and let $X\coloneqq e$, …].`, `Let
+  $a,b\in A$, and let $X\coloneqq e$.`: variables of the rest of the result or proof,
+  and definitions local to it. -/
+  | assumeAll (binds : List Bind) (defs : List MT)
   deriving Repr, Inhabited
 
 /-- `$f,g:A\to B$`: several names with one signature. -/
@@ -848,8 +990,121 @@ def classOf (cs : List Chunk) : Option (List Chunk) := do
   let r ← kw [w!"class", w!"of"] cs <|> kw [w!"set", w!"of"] cs
   some ((kw [w!"all"] r).getD r)
 
+/-- `NOUN $x$`, the noun phrase of a notion's subject with its variable, or `$x$`. -/
+def nounVar (cs : List Chunk) : Option (List Chunk × List Chunk) :=
+  let ws := cs.takeWhile (fun c => match c with
+    | .w v => !notionStops.contains v
+    | .p 45 => true
+    | _ => false)
+  match cs.drop ws.length with
+  | .m [.id v] :: r => some (ws ++ [.m [.id v]], r)
+  | _ => none
+
+/-- `NAME [(ABBR)]`. -/
+def nameAbbr (cs : List Chunk) : Option (List Codes × List Codes × List Chunk) := do
+  let (name, r) := nameWords 8 cs []
+  if name.isEmpty then none else
+  match punct 40 r with
+  | some r1 => do
+    let (abbr, r2) := nameWords 4 r1 []
+    let r3 ← punct 41 r2
+    if abbr.isEmpty then none else some (name, abbr, r3)
+  | none => some (name, [], r)
+
+/-- `non-increasing`, `non-decreasing`, `strictly increasing`, `strictly decreasing`. -/
+def monoWord (cs : List Chunk) : Option (Mono × List Chunk) :=
+  ((kw [w!"non"] cs >>= punct 45 >>= kw [w!"increasing"]).map (Mono.nonincreasing, ·)) <|>
+  ((kw [w!"nonincreasing"] cs).map (Mono.nonincreasing, ·)) <|>
+  ((kw [w!"non"] cs >>= punct 45 >>= kw [w!"decreasing"]).map (Mono.nondecreasing, ·)) <|>
+  ((kw [w!"nondecreasing"] cs).map (Mono.nondecreasing, ·)) <|>
+  ((kw [w!"strictly", w!"increasing"] cs).map (Mono.increasing, ·)) <|>
+  ((kw [w!"strictly", w!"decreasing"] cs).map (Mono.decreasing, ·))
+
+/-- `for every|all|each $x\in A$`. -/
+def forBinder (cs : List Chunk) : Option (Bind × List Chunk) := do
+  let r ← kw [w!"for", w!"every"] cs <|> kw [w!"for", w!"all"] cs <|> kw [w!"for", w!"each"] cs
+  let (ts, r1) ← mathChunk r
+  let (vs, d) ← binderMath ts
+  some (.every vs d, r1)
+
+/-- The condition of a notion: `[, for every $v\in A$,] the map M[,] is MONO`, or
+`$φ$ [for all $x\in A$]`. -/
+def notionCond (cs : List Chunk) : Option NotionCond :=
+  let cs := optPunct 44 cs
+  (do
+    let (bs, r) : List Bind × List Chunk := match forBinder cs with
+      | some (b, r') => match punct 44 r' with
+        | some r'' => ([b], r'')
+        | none => ([], cs)
+      | none => ([], cs)
+    let r1 ← kw [w!"the", w!"map"] r <|> kw [w!"the", w!"function"] r
+    let (m, r2) ← (display r1).map (fun (m, _, r') => (m, r')) <|> formula r1
+    let r3 ← kw [w!"is"] (optPunct 44 r2)
+    let (mono, r4) ← monoWord r3
+    if isEnd r4 then some (NotionCond.mono bs m mono) else none) <|>
+  (do
+    let (φ, r1) ← formula cs
+    if isEnd r1 then some (NotionCond.formula φ []) else do
+    let (b, r2) ← forBinder r1
+    if isEnd r2 then some (NotionCond.formula φ [b]) else none)
+
+/-- A notion defined in the text: `We call a NOUN $x$ NAME [(ABBR)] if COND.`,
+`[A NOUN] $x$ is called NAME [(ABBR)] if COND.`, `[A NOUN] $x$ is NAME [(ABBR)] if COND.` -/
+def notionDef (cs : List Chunk) : Option Sent :=
+  let article (r : List Chunk) := (kw [w!"a"] r <|> kw [w!"an"] r).getD r
+  (do
+    let r ← kw [w!"we", w!"call"] cs
+    let (np, r1) ← nounVar (article r)
+    let (name, abbr, r2) ← nameAbbr r1
+    let r3 ← kw [w!"if"] r2
+    let cond ← notionCond r3
+    some (.defNotion np name abbr cond)) <|>
+  (do
+    let (np, r1) ← nounVar (article cs)
+    let r2 ← kw [w!"is", w!"called"] r1 <|> kw [w!"is", w!"said", w!"to", w!"be"] r1 <|> kw [w!"is"] r1
+    let (name, abbr, r3) ← nameAbbr r2
+    let r4 ← kw [w!"if"] r3
+    let cond ← notionCond r4
+    some (.defNotion np name abbr cond))
+
+/-- `$x\in A$`, or `$C$ be a|an NP`: the variable of a `let`. -/
+def letBinder (cs : List Chunk) : Option (Bind × List Chunk) :=
+  (do
+    let (ts, r) ← mathChunk cs
+    let (vs, d) ← binderMath ts
+    some (.every vs d, r)) <|>
+  (do
+    let (ts, r) ← mathChunk cs
+    let v ← match ts with | [.id v] => some v | _ => none
+    let r1 ← kw [w!"be", w!"a"] r <|> kw [w!"be", w!"an"] r
+    let ws := r1.takeWhile (fun c => match c with | .w _ | .p 45 => true | _ => false)
+    if ws.isEmpty then none else some (.noun (ws ++ [.m [.id v]]), r1.drop ws.length))
+
+/-- Further variables and definitions of a `let`: `, and let $u\in A$`, `and $v\in B$`,
+`, and let $X\coloneqq e$`, `, $Y\coloneqq f$ and $Z\coloneqq g$`. -/
+def letMore : Nat → List Chunk → List Bind → List MT → Option (List Bind × List MT × List Chunk)
+  | 0, cs, bs, ds => some (bs.reverse, ds.reverse, cs)
+  | f + 1, cs, bs, ds =>
+    let next := (punct 44 cs >>= kw [w!"and", w!"let"]) <|> (punct 44 cs >>= kw [w!"and"]) <|>
+      kw [w!"and", w!"let"] cs <|> kw [w!"and"] cs <|> punct 44 cs
+    match next with
+    | none => some (bs.reverse, ds.reverse, cs)
+    | some r =>
+      match letBinder r with
+      | some (b, r') => letMore f r' (b :: bs) ds
+      | none =>
+        match formula r with
+        | some (m, r') =>
+          match m with
+          | .chain _ ((.defeq, _) :: _) => letMore f r' bs (m :: ds)
+          | _ => some (bs.reverse, ds.reverse, cs)
+        | none => some (bs.reverse, ds.reverse, cs)
+
 def sentence (cs : List Chunk) : Option Sent :=
   let (topic, cs) := marker cs
+  match notionDef cs with
+  | some s => some s
+  | none =>
   -- let $S$ denote the class of NOUNS, that is, NP.
   match kw [w!"let"] cs with
   | some r =>
@@ -858,6 +1113,12 @@ def sentence (cs : List Chunk) : Option Sent :=
       let (ts, r1) ← mathChunk r
       let (vs, d) ← binderMath ts
       if isEnd r1 then some (.assume (.every vs d)) else none) <|>
+    -- `Let $C$ be a|an NP[, and let …]`, `Let $a,b\in A$, and let $X\coloneqq e$, ….`
+    (do
+      let (b1, r1) ← letBinder r
+      let (bs, ds, r2) ← letMore 6 r1 [b1] []
+      let isNoun := match b1 with | .noun _ => true | _ => false
+      if isEnd r2 && (isNoun || bs.length > 1 || !ds.isEmpty) then some (.assumeAll bs ds) else none) <|>
     -- `Let $f,g:A\to B$ be continuous, normalized by …, with derivatives DISPLAY.`
     (do
       let (ts, r1) ← mathChunk r
@@ -996,6 +1257,15 @@ where
           else defPieces f (optPunct 44 r') acc ls
         | none => some (acc.reverse, ls, r)
   claimsOrDefs (topic : Topic) (cs : List Chunk) : Option Sent :=
+    -- `Since $φ$ [and $ψ$], [it follows that] CLAUSES.`: the reasons are claims too
+    match kw [w!"since"] cs with
+    | some r => do
+      let (facts, r1) ← sinceFacts 4 r []
+      let r2 ← punct 44 r1
+      let (_, r3) := marker r2
+      let rest ← clauses 8 r3 []
+      some (.claims topic [] (facts.map (fun m => ({ cites := [], clause := .fact m } : CClause)) ++ rest))
+    | none =>
     match binder cs with
     | some (b, r) =>
       match (punct 44 r).map fun r1 => (kw [w!"then"] r1).getD r1 with
@@ -1040,6 +1310,18 @@ where
       (do
         let cs ← clauses 8 cs []
         some (.claims topic [] cs))
+  /-- `$φ$[, $ψ$] [and $χ$]` before the comma of `since`. -/
+  sinceFacts : Nat → List Chunk → List MT → Option (List MT × List Chunk)
+    | 0, _, _ => none
+    | f + 1, cs, acc => do
+      let (m, r) ← formula cs
+      let acc := m :: acc
+      match kw [w!"and"] r with
+      | some r' => sinceFacts f r' acc
+      | none =>
+        match r with
+        | .p 44 :: .m t :: r' => sinceFacts f (.m t :: r') acc
+        | _ => some (acc.reverse, r)
   /-- `set DEFS, and define continuous functions $f,g:A\to B$ by ANCHORS, and DISPLAY.` -/
   derivAfterSet (b : Bind) (cs : List Chunk) : Option Sent := do
     let (items, _, r1) ← defList 6 cs [] []

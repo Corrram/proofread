@@ -1,13 +1,14 @@
 # Live demo
 
-These pages are the web reader of three example articles, built from the
-reports their certificates wrote. Each renders the article from its LaTeX
-source with a marker at the start of every sentence. Select a marker to see what
-Lean checked for that sentence: its formal reading, its Lean statement, its
-definedness condition, the premises it rests on and the declaration that
-justifies it.
+These pages are the web reader of four example articles, built from the
+reports their certificates wrote. Each is a short paper in the usual style,
+with an abstract, an introduction and references, and each renders from its
+LaTeX source with a marker at the start of every sentence. Select a marker to
+see what Lean checked for that sentence: its formal reading, its Lean
+statement, its definedness condition, the premises it rests on and the
+declaration that justifies it.
 
-<div class="grid cards pr-one" markdown>
+<div class="grid cards pr-two" markdown>
 
 -   :material-check-decagram:{ .lg .middle } **The certified note**
 
@@ -27,14 +28,25 @@ justifies it.
 
     [:octicons-arrow-right-24: Open the reader](demo/refuted/index.html)
 
--   :material-square-outline:{ .lg .middle } **The smallest example**
+-   :material-function-variant:{ .lg .middle } **Three means**
 
     ---
 
-    *Two inequalities for squares*: one definition, a lemma, and a theorem with
-    a two-sentence proof.
+    *The harmonic, geometric and arithmetic mean of two numbers*: symbols
+    defined inside a theorem, in a `where`-clause and in apposition, and an
+    equality case read as "if and only if". 16 claims, all verified.
 
-    [:octicons-arrow-right-24: Open the reader](demo/squares/index.html)
+    [:octicons-arrow-right-24: Open the reader](demo/means/index.html)
+
+-   :material-chart-bell-curve:{ .lg .middle } **Tail monotone copulas**
+
+    ---
+
+    *Tail monotone copulas are positively quadrant dependent*: the notions LTD,
+    RTI and PQD are defined in the running text, the way a paper defines them,
+    and used by their abbreviations. 8 claims, all derived in the text.
+
+    [:octicons-arrow-right-24: Open the reader](demo/tail/index.html)
 
 </div>
 
@@ -61,8 +73,9 @@ filters the markers.
 | --- | --- | --- |
 | The certified note | [`examples/Demo`](../examples/Demo) | [article](../examples/Demo/article.tex) · [proofs](../examples/Demo/Proofs.lean) · [report](../examples/Demo/article.proofread.json) · [draft](../examples/Demo/draft.tex) |
 | The draft with a false theorem | [`tests/Refuted`](../tests/Refuted) | [article](../tests/Refuted/article.tex) · [proofs](../tests/Refuted/Proofs.lean) · [report](../tests/Refuted/article.proofread.json) |
-| The smallest example | [`examples/Squares`](../examples/Squares) | [article](../examples/Squares/article.tex) · [proofs](../examples/Squares/Proofs.lean) · [report](../examples/Squares/article.proofread.json) |
+| Three means | [`examples/Means`](../examples/Means) | [article](../examples/Means/article.tex) · [proofs](../examples/Means/Proofs.lean) · [report](../examples/Means/article.proofread.json) |
+| Tail monotone copulas | [`examples/TailDependence`](../examples/TailDependence) | [article](../examples/TailDependence/article.tex) · [proofs](../examples/TailDependence/Proofs.lean) · [report](../examples/TailDependence/article.proofread.json) |
 
-CI certifies all three on every push, so the reports cannot go stale. To build
+CI certifies all four on every push, so the reports cannot go stale. To build
 the reader of your own article, see
 [step 8 of the tutorial](getting-started.md#8-read-and-share-the-result).

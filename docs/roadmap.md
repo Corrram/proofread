@@ -37,6 +37,14 @@ grammar does not have yet.
 6. **Parametric families of copulas defined by a construction**: the extremizers
    `C_\theta` of the rho-gamma article (Section 3, `def:extremizers`), which
    Theorem 1.1 uses through `G(\theta)` and `P(\theta)`.
+7. **Markov kernels of copulas.** "We call a copula $C$ \emph{stochastically
+   increasing} (\emph{SI}) if its Markov kernel can be chosen such that, for
+   every $v\in(0,1)$, the map $t\mapsto K_C(t,[0,v])$ is non-increasing." The
+   sentence is a notion in the running text, which the grammar reads, but its
+   condition needs the Markov kernel `K_C` in the vocabulary, as a kernel
+   determined up to null sets, with "can be chosen such that" read as an
+   existential over its versions. Tail monotonicity (LTD, RTI) needs no kernel
+   and is read today ([`examples/TailDependence`](../examples/TailDependence)).
 
 Each construction gets one documented reading in `Proofread/Grammar.lean` and
 `Proofread/Doc.lean`, an example in `docs/writing.md`, and an exemplar sentence

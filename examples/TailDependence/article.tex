@@ -1,0 +1,69 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{proofread}
+\newtheorem{proposition}{Proposition}
+\newcommand{\CC}{\mathcal{C}}
+
+\title{Tail monotone copulas are positively quadrant dependent}
+\author{Proofread example}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A copula is left-tail decreasing when the conditional probability of a small second coordinate decreases in the first.
+We show in a few lines that such copulas, and likewise right-tail increasing ones, are positively quadrant dependent.
+\end{abstract}
+
+\section{Introduction}
+
+Positive dependence of two random variables can be expressed by several orderings of their copula, and \cite[Ch.~5]{nelsen2006introduction} collects the classical ones.
+Tail monotonicity is among the strongest of them.
+The implications between these notions are well known, and we include the short arguments for the two tail notions below.
+
+\section{Notions of positive dependence}
+
+Let $\CC$ denote the class of bivariate copulas.
+For the copula-theoretic formulations used here, we follow \cite[Ch.~5]{nelsen2006introduction}.
+We call a copula $C$ \emph{positively quadrant dependent} (\emph{PQD}) if $C(u,v)\ge uv$ for all $u,v\in[0,1]$.
+A copula $C$ is called \emph{left-tail decreasing} (\emph{LTD}) if, for every $v\in[0,1]$, the map
+\begin{equation}\label{eq:ltd}
+u\longmapsto\frac{C(u,v)}{u},\qquad u\in(0,1],
+\end{equation}
+is non-increasing.
+Similarly, $C$ is called \emph{right-tail increasing} (\emph{RTI}) if, for every $v\in[0,1]$, the map
+\begin{equation}\label{eq:rti}
+u\longmapsto\frac{1-u-v+C(u,v)}{1-u},\qquad u\in[0,1),
+\end{equation}
+is non-decreasing.
+
+\section{Tail monotonicity implies quadrant dependence}
+
+\begin{proposition}\label{prop:ltd}
+Every LTD copula is PQD.
+\end{proposition}
+
+\begin{proof}
+Let $C$ be an LTD copula, and let $u,v\in[0,1]$.
+If $u=0$, then $C(u,v)=0=uv$.
+If $u>0$, then $\frac{C(u,v)}{u}\ge C(1,v)=v$ by \eqref{eq:ltd}.
+Hence $C(u,v)\ge uv$.
+\end{proof}
+
+\begin{proposition}\label{prop:rti}
+Every RTI copula is PQD.
+\end{proposition}
+
+\begin{proof}
+Let $C$ be an RTI copula, and let $u,v\in[0,1]$.
+If $u=1$, then $C(u,v)=v=uv$.
+If $u<1$, then $\frac{1-u-v+C(u,v)}{1-u}\ge1-v+C(0,v)=1-v$ by \eqref{eq:rti}.
+Hence $C(u,v)\ge uv$.
+\end{proof}
+
+\begin{thebibliography}{1}
+\bibitem{nelsen2006introduction} R.~B. Nelsen, \emph{An Introduction to Copulas}, 2nd ed., Springer Series in Statistics, Springer, New York, 2006.
+\end{thebibliography}
+
+\end{document}

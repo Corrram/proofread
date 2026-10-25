@@ -166,6 +166,19 @@ def nounPhrase (np : List Chunk) : M BindInfo := do
       | some (m, r) => pre f r (m :: acc)
       | none => (acc.reverse, cs)
   let (pms, r0) := pre 4 np []
+  -- notions of the article before the noun (`an LTD copula $C$`)
+  let rec matchName : List Codes → List Chunk → Option (List Chunk)
+    | [], cs => some cs
+    | w :: ws, .w v :: cs => if v == w then matchName ws cs else none
+    | w :: ws, .p 45 :: cs => if w == w!"-" then matchName ws cs else none
+    | _, _ => none
+  let rec preN : Nat → List Chunk → List Nat → List Nat × List Chunk
+    | 0, cs, acc => (acc.reverse, cs)
+    | f + 1, cs, acc =>
+      match st.notions.findSome? (fun (ph, i) => (matchName ph cs).map (i, ·)) with
+      | some (i, r) => preN f r (i :: acc)
+      | none => (acc.reverse, cs)
+  let (nms, r0) := preN 4 r0 []
   -- the head: an article class, a vocabulary noun, or a variable with a signature
   -- (the article's own classes take precedence over the vocabulary's nouns)
   let head : M (Ty × List Tm × Option (List MTok) × List Chunk) := do
@@ -208,6 +221,15 @@ def nounPhrase (np : List Chunk) : M BindInfo := do
   let (ty, preds, var, r1) ← head
   for m in pms do
     if m.ty != ty then fail E.type
+  let notionPreds ← nms.mapM fun i => do
+    let some g := st.globs[i]? | fail E.type
+    match g.ty with
+    | .fn a .prop =>
+      if a != ty then fail E.type
+      -- the notion is a predicate on its domain (copulas), which the noun phrase
+      -- states first
+      else pure (Tm.glob i)
+    | _ => fail E.type
   -- postnominal modifiers
   let rec post : Nat → List Chunk → List Tm → M (List Tm × List Chunk)
     | 0, cs, acc => pure (acc.reverse, cs)
@@ -225,7 +247,7 @@ def nounPhrase (np : List Chunk) : M BindInfo := do
   let memberPred ← match member with
     | some (t, p) => if t == ty then pure p.toList else fail E.type
     | none => pure []
-  let all := (preds ++ pms.map (·.pred) ++ qms ++ memberPred).eraseDups
+  let all := (preds ++ pms.map (·.pred) ++ qms ++ memberPred ++ notionPreds).eraseDups
   pure ⟨name, ty, conjPreds ty all⟩
 
 /-- Free identifiers of a formula (for `On I,`). -/
@@ -281,6 +303,18 @@ def scopeOf (bs : List BindInfo) : Scope := (bs.map fun b => (b.name, b.ty)).rev
 def wrap (bs : List BindInfo) (body : Tm) : Tm :=
   forallBinders (bs.map fun b => (b.name, b.ty, b.pred.map fun p => Tm.app p (.loc 0))) body
 
+/-- The implicit parameters of the definitions named among `ids` (visible here). -/
+def implicitVars (st : St) (ids : List Codes) : List Codes :=
+  ids.flatMap fun n =>
+    let rec find : Nat → List Glob → Option Nat
+      | _, [] => none
+      | i, g :: gs => match find (i + 1) gs with
+        | some j => some j
+        | none => if g.key == n && Elab.visibleIn st i then some i else none
+    match find 0 st.globs with
+    | some i => (st.implicits.lookup i).getD []
+    | none => []
+
 def clauseMaths : Clause → List MT
   | .fact f | .holds f => [f]
   | .deriv d _ c => [d, c]
@@ -297,6 +331,9 @@ def clauseMaths : Clause → List MT
   | .equalityWhen φ => [φ]
   | .ifThen c cl => c :: clauseMaths cl
   | .adjectives s _ => [s]
+  | .notions s _ _ => [s]
+  | .iff p q => [p, q]
+  | .compare l _ r => [l, r]
   | _ => []
 
 /-- The two sides `(smaller, larger)` of a single inequality. -/
@@ -327,6 +364,12 @@ def ineqFree (st : St) (cl : Clause) : List Codes :=
     | some (bs, m) => freeIds 64 (bs.map (·.name)) m
     | none => []
   else []
+
+/-- The free variables of a clause, its trailing definitions and the implicit
+parameters of the definitions it uses (for the binders it inherits). -/
+def clauseFree (st : St) (bound : List Codes) (cl : CClause) : List Codes :=
+  let ids := (clauseMaths cl.clause ++ cl.defs).flatMap (freeIds 64 bound)
+  ids ++ implicitVars st ids ++ ineqFree st cl.clause
 
 /-- A piecewise formula that no piece covers is `0` there (for integrands). -/
 def zeroElsewhere : Tm → Tm
@@ -755,7 +798,7 @@ def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := d
     let (v, vty) ← term F sc none rhs
     let value := Tm.lam b.ty (holdsAt b.pred (.loc 0)) (lamWrap ats v)
     let i ← addGlob ⟨key, .fn b.ty (tyWrap ats vty), b.pred :: ats.map (fun _ => none), family⟩ value
-    if !family then modify fun st => { st with implicits := st.implicits ++ [(i, b.name)] }
+    if !family then modify fun st => { st with implicits := st.implicits ++ [(i, [b.name])] }
     let x : Tm × Ty := (.guard (holdsAt b.pred (.loc 0)) (.app (.glob i) (.loc 0)), vty)
     let sc1 : Scope := [(b.name, b.ty)]
     let ps ← more.mapM fun (r, y) => do
@@ -933,6 +976,110 @@ def defClass (sym : MT) (plural : List Codes) (np : List Chunk) : M (List Nat ×
   let names := [sing, (sing.getLast?).toList].eraseDups
   modify fun st => { st with nouns := st.nouns ++ names.map (·, i), classes := st.classes ++ [(plural, i)] }
   pure ([i], [])
+
+/-! ## Inline definitions and notions -/
+
+/-- An inline definition `X\coloneqq e` or `f(y)\coloneqq e` among the binders `bs` of
+its context: an argument that is a binder's variable ranges over the binder's
+domain, and the binders that `e` uses are implicit parameters, supplied from the
+scope at each use. Inside a result or a proof, the definition is local to it. -/
+def inlineDef (c : SentCtx) (bs : List BindInfo) (m : MT) : M Nat := do
+  match m with
+  | .chain lhs [(.defeq, rhs)] =>
+    let (hd, args) := match lhs with
+      | .app h as => (h, as)
+      | _ => (lhs, [])
+    let some key := Elab.symKey hd | fail E.unsupported
+    let argNames ← args.mapM fun a => match a with | .id n => pure n | _ => fail E.unsupported
+    let st ← get
+    let ids := freeIds 64 argNames rhs
+    let used := ids ++ implicitVars st ids
+    let imp := bs.filter fun b => used.contains b.name && !argNames.contains b.name
+    let argInfo : List BindInfo := argNames.map fun n => match bs.find? (·.name == n) with
+      | some b => b
+      | none => ⟨n, .real, none⟩
+    let all := imp ++ argInfo
+    let (v, vty) ← term F (scopeOf all) none rhs
+    let value := all.foldr (fun b acc => Tm.lam b.ty (holdsAt b.pred (.loc 0)) acc) v
+    let ty := all.foldr (fun b acc => Ty.fn b.ty acc) vty
+    let i ← addGlob ⟨key, ty, all.map (·.pred), false⟩ value
+    if !imp.isEmpty then modify fun st => { st with implicits := st.implicits ++ [(i, imp.map (·.name))] }
+    match c.ctx.kind with
+    | .text => pure ()
+    | _ => modify fun st => { st with locals := st.locals ++ [(i, c.ctx.env)] }
+    pure i
+  | _ => fail E.unsupported
+
+/-- Make the definitions of a clause: those after it (`where`) and those inside a
+comparison (`the geometric mean $G\coloneqq\sqrt{ab}$`), which become their symbols. -/
+def inlineClause (c : SentCtx) (bs : List BindInfo) (defs : List MT) (k : Clause) : M Clause := do
+  for d in defs do discard <| inlineDef c bs d
+  let side (m : MT) : M MT := match m with
+    | .chain lhs [(.defeq, _)] => do discard <| inlineDef c bs m; pure lhs
+    | _ => pure m
+  match k with
+  | .compare l r rr => pure (.compare (← side l) r (← side rr))
+  | _ => pure k
+
+/-- `x\mapsto e` (with its domain, `x\mapsto e,\ x\in D`) is non-increasing, …:
+`∀ s t ∈ D, s ≤ t → e(t) ≤ e(s)`. -/
+def monoTm (sc : Scope) (m : MT) (mono : Mono) : M Tm := do
+  let (x, e, dom) ← match m with
+    | .mapsto (.id x) e => pure (x, e, none)
+    | .conj [.mapsto (.id x) e, .chain (.id y) [(.mem, d)]] =>
+      if x == y then pure (x, e, some d) else fail E.unsupported
+    | _ => fail E.unsupported
+  let (ty, p) ← match dom with
+    | some d => domainOf true d
+    | none => pure (.real, none)
+  if ty != .real then fail E.unsupported
+  let et ← asReal (← term F ((x, ty) :: (w!"", ty) :: sc) none e)
+  let es ← asReal (← term F ((w!"", ty) :: (x, ty) :: sc) none e)
+  let (pre, concl) : Tm × Tm := match mono with
+    | .nonincreasing => (.le (.loc 1) (.loc 0), .le et es)
+    | .nondecreasing => (.le (.loc 1) (.loc 0), .le es et)
+    | .increasing => (.lt (.loc 1) (.loc 0), .lt es et)
+    | .decreasing => (.lt (.loc 1) (.loc 0), .lt et es)
+  pure (.all ty (.imp (holdsAt p (.loc 0)) (.all ty (.imp (holdsAt p (.loc 0)) (.imp pre concl)))))
+
+/-- The condition of a notion, about its subject (`loc 0` of `sc`). -/
+def notionBody (sc : Scope) (cond : NotionCond) : M Tm := do
+  match cond with
+  | .formula f binds =>
+    let bs := (← binds.mapM binderInfos).flatten
+    pure (wrap bs (← prop (scopeOf bs ++ sc) none f))
+  | .mono binds m mono =>
+    let bs := (← binds.mapM binderInfos).flatten
+    pure (wrap bs (← monoTm (scopeOf bs ++ sc) m mono))
+
+/-- `We call a copula $C$ NAME (ABBR) if COND.`: the notion `λ C, COND`, named by
+`NAME` and `ABBR`. -/
+def defNotion (subj : List Chunk) (name abbr : List Codes) (cond : NotionCond) :
+    M (List Nat × List Nat) := do
+  let s ← match subj with
+    | [.m [.id v]] => match (← get).notionSubject with
+      | some b => if b.name == v then pure b else fail E.free v
+      | none => fail E.free v
+    | np => nounPhrase np
+  if s.name.isEmpty then fail E.unsupported
+  let body ← notionBody (scopeOf [s]) cond
+  let i ← addGlob ⟨[], .fn s.ty .prop, [s.pred], false⟩ (.lam s.ty (holdsAt s.pred (.loc 0)) body)
+  let names := [name] ++ (if abbr.isEmpty then [] else [abbr])
+  modify fun st => { st with notions := st.notions ++ names.map (·, i), notionSubject := some s }
+  pure ([i], [])
+
+/-- A notion of the article applied to a term. -/
+def notionApp (x : Tm × Ty) (name : List Codes) : M Tm := do
+  let st ← get
+  let some i := st.notions.lookup name | fail E.prose name.flatten
+  let some g := st.globs[i]? | fail E.noun name.flatten
+  let (t, _) ← applyAll (.glob i) g.ty g.doms [x]
+  pure t
+
+def disjAll : List Tm → Tm
+  | [] => .not .tt
+  | [p] => p
+  | p :: ps => .or p (disjAll ps)
 
 /-! ## Claim sentences -/
 
@@ -1115,6 +1262,16 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
     let h ← prop sc none cond
     let p ← clauseTm c sc onVar lastRhs cl
     pure (.imp h p)
+  | .notions s names disj => do
+    let x ← term F sc none s
+    let ps ← names.mapM (notionApp x)
+    pure (if disj then disjAll ps else conjAll ps)
+  | .everyIs np names disj => do
+    let b ← nounPhrase np
+    let ps ← names.mapM (notionApp (.loc 0, b.ty))
+    pure (wrap [b] (if disj then disjAll ps else conjAll ps))
+  | .iff p q => do pure (.iff (← prop sc none p) (← prop sc none q))
+  | .compare l r rr => do relTm r (← term F sc none l) (← term F sc none rr)
   | .adjectives s adjs => do
     let (t, ty) ← term F sc none s
     -- a function's domain is the one its definition states
@@ -1245,8 +1402,7 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
       let clBound := cls.flatMap fun cl => (cl.binds.flatMap fun b => match b with
         | .every vs _ => vs | _ => []) ++ (match cl.clause with
           | .scoped _ vs _ _ | .every vs _ _ => vs | _ => [])
-      let free := (cls.flatMap (fun cl => (clauseMaths cl.clause).flatMap (freeIds 64 (known ++ clBound)) ++
-        ineqFree st cl.clause)).eraseDups
+      let free := (cls.flatMap (fun cl => clauseFree st (known ++ clBound) cl)).eraseDups
       let free := free.filter fun n => !(st.globs.any fun g => g.key == n && !g.family)
       pure (st.envBinders.filter fun b => free.contains b.name)
     else pure []
@@ -1297,10 +1453,12 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
         -- `equality holds …` binds the variables of the inequality it refers to
         let stNow ← get
         let own := own ++ (if usesIneq k then ((stNow.lastIneq.map (·.1.map (·.name))).getD []) else [])
-        let free := (clauseMaths k).flatMap (freeIds 64 ((scopeOf (bs ++ cbs)).map (·.1) ++ own)) ++
-          ineqFree (← get) k
+        let free := clauseFree stNow ((scopeOf (bs ++ cbs)).map (·.1) ++ own) cl
         let inh := inherited.filter fun b => free.contains b.name
         let outer := if cbs.isEmpty then inh ++ bs ++ onVar.toList else inh
+        -- definitions inside the clause (`the mean $G\coloneqq\sqrt{ab}$`) and after it
+        -- (`…, where $d\coloneqq …$`), in the scope of its binders
+        let k ← inlineClause c (outer ++ cbs) cl.defs k
         let p ← clauseTm c (scopeOf cbs ++ scopeOf outer) onVar last k
         -- an inequality about the bound variables is the referent of a later
         -- `equality holds exactly when …`
@@ -1360,12 +1518,29 @@ def sentence (c : SentCtx) (s : Sent) : M (List Nat × List Nat) := do
     let (d', c') ← letDenote bi sym np
     pure (ds ++ d', cs ++ c')
   | .claims topic binds cls => do
+    -- definitions made inside the sentence (`where`, `the mean $G\coloneqq …$`)
+    let n0 := (← get).globs.length
     let ids ← claimSentence c topic binds cls
-    pure ([], ids)
+    let n1 := (← get).globs.length
+    pure ((List.range (n1 - n0)).map (n0 + ·), ids)
   | .fix b defs labels => do
     let [bi] ← binderInfos b | fail E.unsupported
     modify fun st => { st with fixed := (c.ctx.sec, bi) :: st.fixed.filter (·.2.name != bi.name) }
     if defs.isEmpty then pure ([], []) else constDefs c (some bi) defs labels
+  | .defNotion subj name abbr cond => defNotion subj name abbr cond
+  | .assumeAll binds defs => do
+    let bs := (← binds.mapM binderInfos).flatten
+    match c.ctx.kind with
+    | .text =>
+      modify fun st => { st with fixed := bs.map (c.ctx.sec, ·) ++ st.fixed.filter fun (_, x) => !(bs.any (·.name == x.name)) }
+    | _ =>
+      modify fun st => { st with envBinders := bs ++ st.envBinders.filter fun x => !(bs.any (·.name == x.name)) }
+    let st ← get
+    let scope := match c.ctx.kind with
+      | .text => (st.fixed.filter (·.1 == c.ctx.sec)).map (·.2)
+      | _ => st.envBinders
+    let ds ← defs.mapM (inlineDef c scope)
+    pure (ds, [])
   | .assume b => do
     let bs ← binderInfos b
     match c.ctx.kind with
@@ -1417,9 +1592,18 @@ open Compile in
 def compileOne (envs : List (Codes × Nat)) (c : CState) (s : Sentence) : CState :=
   -- entering a new environment resets proof-local state
   let st0 := c.st
+  let proved : Option Nat := match s.ctx.kind with
+    | .proof => envs.lookup s.ctx.proves
+    | _ => none
+  -- a proof starts with the variables of the result it proves
+  let inheritedBinders : List BindInfo := match proved with
+    | some e => (st0.resultBinders.lookup e).getD []
+    | none => []
   let st0 := if st0.proofEnv != s.ctx.env then
-      { st0 with proofEnv := s.ctx.env, proofCites := [], proofSteps := [], topic := .none, envBinders := [] }
+      { st0 with proofEnv := s.ctx.env, proofCites := [], proofSteps := [], topic := Topic.none, envBinders := inheritedBinders }
     else st0
+  -- definitions local to a result are visible in it and in its proof
+  let st0 := { st0 with curEnv := s.ctx.env, curProved := proved }
   let ps := match s.ctx.kind with
     | .proof => if c.proofs.any (·.env == s.ctx.env) then c.proofs
       else c.proofs ++ [({ env := s.ctx.env, proves := s.ctx.proves, steps := [], cites := [], complete := true } : ProofInfo)]
@@ -1440,6 +1624,10 @@ def compileOne (envs : List (Codes × Nat)) (c : CState) (s : Sentence) : CState
           | .result _ => if s.ctx.label.isEmpty then ls else s.ctx.label :: ls
           | _ => ls
         Compile.addLabels ls cs false
+      | .defNotion .. =>
+        -- the displays of a notion's definition: citing them cites the definition
+        let ls := s.toks.filterMap fun p => match p.tok with | .ref .label l => some l | _ => none
+        Compile.addLabels ls [] true
       | _ => pure ()
       pure (ds, cs)
     let (r, st) := labelled.run.run st0
@@ -1447,9 +1635,14 @@ def compileOne (envs : List (Codes × Nat)) (c : CState) (s : Sentence) : CState
     | .ok (ds, cs) =>
       let ps := ps.map fun p => if p.env == s.ctx.env then
         { p with steps := st.proofSteps, cites := st.proofCites } else p
+      let saved := (s.ctx.env, st.envBinders) :: st.resultBinders.filter (·.1 != s.ctx.env)
+      let st := match s.ctx.kind with
+        | .result _ => { st with resultBinders := saved }
+        | _ => st
       { st, idx := c.idx + 1, outcomesRev := .compiled ds cs :: c.outcomesRev, proofs := ps }
     | .error e =>
-      { c with st := st0, idx := c.idx + 1, outcomesRev := .failed e :: c.outcomesRev, proofs := incomplete ps }
+      let o : Outcome := if e.code == E.prose then .prose else .failed e
+      { c with st := st0, idx := c.idx + 1, outcomesRev := o :: c.outcomesRev, proofs := incomplete ps }
 
 /-- Compile a list of sentences, starting from a compiler state. -/
 def compileAll (envs : List (Codes × Nat)) (c : CState) (ss : List Sentence) : CState :=
@@ -1480,7 +1673,7 @@ def finish (ss : List Sentence) (c : CState) : Doc :=
   let st := c.st
   let claims := closeProofs ss st.claims c.proofs
   ⟨st.globs, st.values, claims, ss.map (fun s => (s.ctx, s.start, s.stop)), c.outcomesRev.reverse,
-    st.labels, c.proofs, st.preds ++ st.named ++ st.ops ++ st.classes⟩
+    st.labels, c.proofs, st.preds ++ st.named ++ st.ops ++ st.classes ++ st.notions⟩
 
 /-- Compile the sentences of an article into its document. -/
 def assemble (V : Vocab) (ss : List Sentence) : Doc :=

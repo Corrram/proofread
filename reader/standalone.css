@@ -26,3 +26,10 @@ body.lm-compiled a:hover { text-decoration: underline; }
 .article-proof::after { content: ""; display: block; clear: both; }
 .article-bibliography { margin-top: 2rem; font-size: .92rem; }
 .article-bibliography:has(ol:empty) { display: none; }
+.article-abstract { margin: 1.4rem 1.6rem 1.8rem; font-size: .95rem; }
+.mirror-full-article .article-abstract > h2 { text-align: center; font-size: 1rem; margin: 0 0 .3rem; }
+.article-equation { position: relative; margin: .9rem 0; min-width: 0; }
+.article-math { max-width: 100%; overflow-x: auto; padding-right: 2.6rem; }
+.article-math .katex-display { margin: .5em 0; }
+.equation-number { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+@media (max-width: 650px) { .article-abstract { margin-inline: 0; } .article-math { padding-right: 2rem; } }

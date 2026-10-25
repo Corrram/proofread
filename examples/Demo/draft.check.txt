@@ -1,7 +1,7 @@
-examples/Demo/draft.tex:36:1: warning: sentence not compiled (undefined symbol: g); it asserts nothing checked
-examples/Demo/draft.tex:40:1: warning: corollary sentence without a mathematical reading: The function $f$ attains its minimum on $(0,\infty)$ at $1$.
+examples/Demo/draft.tex:46:1: warning: sentence not compiled (undefined symbol: g); it asserts nothing checked
+examples/Demo/draft.tex:50:1: warning: corollary sentence without a mathematical reading: The function $f$ attains its minimum on $(0,\infty)$ at $1$.
 examples/Demo/draft.tex: 1 definitions, 5 claims
-  text: 1 compiled, 0 failed, 5 prose (of 6)
+  text: 1 compiled, 0 failed, 6 prose (of 7)
   results: 2 compiled, 0 failed, 1 prose (of 3)
   proofs: 5 compiled, 1 failed, 0 prose (of 6)
-  all: 8 compiled, 1 failed, 6 prose (of 15)
+  all: 8 compiled, 1 failed, 7 prose (of 16)

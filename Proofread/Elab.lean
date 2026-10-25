@@ -44,6 +44,14 @@ Readings (`x`, `y` range over the domain of the noun or binder):
   continuous, concave, strictly increasing` (on the domain of its definition).
 * `Let $x\in A$.` in a result — `x` ranges over `A` in the rest of the result; a
   later `If φ,` about `x` is a hypothesis.
+* `We call a copula $C$ NAME (ABBR) if φ.`, `$C$ is called NAME if φ.` — the
+  article's notion `NAME` (also `ABBR`) of copulas: `λ C, φ`. Later `$C$ is NAME`,
+  `every NAME copula is NAME'`, `an ABBR copula $C$` use it.
+* `…, the map $x\mapsto e$, $x\in D$, is non-increasing` — `∀ x y ∈ D, x ≤ y → e(y) ≤ e(x)`.
+* A definition inside a result (`Let $a,b\in A$, and let $G\coloneqq\sqrt{ab}$.`), in
+  a claim (`the geometric mean $G\coloneqq\sqrt{ab}$ is at most …`) or after it
+  (`…, where $d\coloneqq\sqrt a-\sqrt b$`) — a definition whose implicit parameters
+  are the variables of its context that it uses, local to the result and its proof.
 -/
 namespace Proofread
 open Grammar
@@ -92,6 +100,9 @@ def E.free := 6
 def E.redefined := 7
 def E.referent := 8
 def E.shadow := 9
+/-- The sentence has the form of an open construction (`$x$ is NAME`), but its words are
+not a notion of the article: it is prose. -/
+def E.prose := 10
 
 abbrev Local := Codes × Ty
 abbrev Scope := List Local
@@ -147,9 +158,22 @@ structure St where
   topic : Topic := .none
   /-- Variables fixed in the running text (`fix $b\in B$`), by section. -/
   fixed : List (Nat × BindInfo) := []
-  /-- Definitions made under a binder whose symbol does not show its variable
-  (`z_-(x)` under `For $b\in B$`): the variable, supplied from the scope at each use. -/
-  implicits : List (Nat × Codes) := []
+  /-- Definitions made under binders whose symbol does not show their variables
+  (`z_-(x)` under `For $b\in B$`): the variables, supplied from the scope at each use. -/
+  implicits : List (Nat × List Codes) := []
+  /-- Notions defined by the article (`We call a copula $C$ NAME (ABBR) if …`): the
+  phrases that name them (the name and the abbreviation) and the predicate. -/
+  notions : List (List Codes × Nat) := []
+  /-- The subject of the latest notion definition (for `Similarly, $C$ is called …`). -/
+  notionSubject : Option BindInfo := none
+  /-- Definitions local to an environment (made inside a result or a proof): the
+  definition and the environment. They are visible there and in its proof. -/
+  locals : List (Nat × Nat) := []
+  /-- The variables of each result at its end (its proof starts with them). -/
+  resultBinders : List (Nat × List BindInfo) := []
+  /-- The environment of the current sentence, and the result its proof proves. -/
+  curEnv : Nat := 0
+  curProved : Option Nat := none
   /-- The binders and the formula of the latest inequality claimed for every point
   of a domain (for `equality holds exactly on …`). -/
   lastIneq : Option (List BindInfo × MT) := none
@@ -224,18 +248,26 @@ def singular (w : Codes) : Codes :=
   | 115 :: r => r.reverse
   | _ => w
 
+/-- Is definition `i` visible here? A definition local to an environment is visible in
+that environment and in the proof of the result it belongs to. -/
+def visibleIn (st : St) (i : Nat) : Bool :=
+  match st.locals.lookup i with
+  | some e => e == st.curEnv || st.curProved == some e
+  | none => true
+
 def lookupGlob (key : Codes) : M (Option (Nat × Glob)) := do
   let st ← get
   let rec find : Nat → List Glob → Option (Nat × Glob)
     | _, [] => none
     | i, g :: gs => match find (i + 1) gs with
       | some r => some r
-      | none => if g.key == key && !key.isEmpty then some (i, g) else none
+      | none => if g.key == key && !key.isEmpty && visibleIn st i then some (i, g) else none
   pure (find 0 st.globs)
 
 def addGlob (g : Glob) (v : Tm) : M Nat := do
   let st ← get
-  match (if g.key.isEmpty then none else st.globs.findIdx? (·.key == g.key)) with
+  let visibleIdx := (List.range st.globs.length).find? fun j => (st.globs[j]?).any (·.key == g.key) && visibleIn st j
+  match (if g.key.isEmpty then none else visibleIdx) with
   | some i =>
     -- a family extended to a further parameter domain (`κ_w` for `w∈[1/2,1)`, then `κ_b`
     -- for `b∈(0,1/2)`): from here on, the symbol names one family on the union, which
@@ -274,14 +306,14 @@ def lookupLocal : Scope → Codes → Option (Nat × Ty)
 /-- Shift free local indices `≥ c` by `k`. -/
 abbrev shift := Tm.shift
 
-/-- The implicit parameter of definition `i`, as a local of the scope. -/
-def implicitArg (sc : Scope) (i : Nat) : M (Option (Tm × Ty)) := do
+/-- The implicit parameters of definition `i`, as locals of the scope. -/
+def implicitArgs (sc : Scope) (i : Nat) : M (List (Tm × Ty)) := do
   match (← get).implicits.lookup i with
-  | some n =>
+  | some ns => ns.mapM fun n =>
     match lookupLocal sc n with
-    | some (j, t) => pure (some (.loc j, t))
+    | some (j, t) => pure (.loc j, t)
     | none => fail E.free n
-  | none => pure none
+  | none => pure []
 
 /-- Closed terms (predicates of globals) used under `n` binders need no shift,
 but a predicate applied to a local must be written as an application. -/
@@ -392,13 +424,13 @@ def constEnd (upper isOpen : Bool) (m : MT) : M (Option Tm) :=
 /-- The point-free subject: a term substituted for unapplied functions on its type. -/
 abbrev PF := Option (Tm × Ty)
 
-/-- Definition `i` applied to its implicit parameter, if it has one. -/
+/-- Definition `i` applied to its implicit parameters, if it has any. -/
 def withImplicit (sc : Scope) (i : Nat) (g : Glob) : M (Tm × Ty × List (Option Tm)) := do
-  match ← implicitArg sc i with
-  | some a => do
-    let (t, ty) ← applyAll (.glob i) g.ty g.doms [a]
-    pure (t, ty, g.doms.drop 1)
-  | none => pure (.glob i, g.ty, g.doms)
+  match ← implicitArgs sc i with
+  | [] => pure (.glob i, g.ty, g.doms)
+  | as => do
+    let (t, ty) ← applyAll (.glob i) g.ty g.doms as
+    pure (t, ty, g.doms.drop as.length)
 
 /-- Elaborate a formula. Fuel bounds the recursion (kernel-reducible). -/
 def term : Nat → Scope → PF → MT → M (Tm × Ty)
@@ -414,11 +446,13 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
         | _, _ => pure (.loc i, t)
       | none =>
         match ← lookupGlob n with
-        | some (i, g) =>
-          match pf, g.ty with
+        | some (i, g) => do
+          -- a symbol with implicit parameters (`G` for `\sqrt{ab}`) takes them from the scope
+          let (t, ty, doms) ← withImplicit sc i g
+          match pf, ty with
           | some (s, sty), .fn a _ =>
-            if a == sty then applyAll (.glob i) g.ty g.doms [(s, sty)] else pure (.glob i, g.ty)
-          | _, _ => pure (.glob i, g.ty)
+            if a == sty then applyAll t ty doms [(s, sty)] else pure (t, ty)
+          | _, _ => pure (t, ty)
         | none => fail E.undefined n
     | .add x y => do
       let a ← asReal (← term f sc pf x); let b ← asReal (← term f sc pf y); pure (.add a b, .real)

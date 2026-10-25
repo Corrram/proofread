@@ -87,7 +87,8 @@ def simplify : Nat → List PTok → Option (List MTok)
     | .finish e => (MTok.finish e :: ·) <$> simplify f ts
     | .ref _ _ => simplify f ts
     | .cmd n =>
-      if n == w!"text" then
+      if n == w!"longmapsto" then (MTok.cmd w!"mapsto" :: ·) <$> simplify f ts
+      else if n == w!"text" then
         match ts with
         | ⟨.lbrace, _, _⟩ :: rest =>
           let inner := rest.takeWhile (fun p => p.tok != .rbrace)
