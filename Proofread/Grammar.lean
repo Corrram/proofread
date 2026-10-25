@@ -239,13 +239,21 @@ def moreAnd : Nat → List Chunk → List Bind → List Bind × List Chunk
     | some (b, r) => moreAnd f r (b :: acc)
     | none => (acc.reverse, cs)
 
-/-- Sentence-initial binders: `For every $x\in A$,` `For $x\in A$,` `For a NP,` `On $I$,`. -/
+/-- Sentence-initial binders: `For every $x\in A$,` `For $x\in A$,` `For a NP,`
+`For every NP $x$,` `On $I$,`. -/
 def binder (cs : List Chunk) : Option (Bind × List Chunk) :=
-  match kw [w!"for", w!"every"] cs, kw [w!"for", w!"all"] cs with
-  | some r, _ | none, some r => do
-    let (ts, r') ← mathChunk r
-    let (vs, dom) ← binderMath ts
-    some (.every vs dom, r')
+  match (kw [w!"for", w!"every"] cs <|> kw [w!"for", w!"each"] cs), kw [w!"for", w!"all"] cs with
+  | some r, _ | none, some r =>
+    (do
+      let (ts, r') ← mathChunk r
+      let (vs, dom) ← binderMath ts
+      some (.every vs dom, r')) <|>
+    -- `For every LTD copula $C$,`: as `For an LTD copula $C$,`
+    (do
+      let np := r.takeWhile (fun c => match c with | .p 44 => false | _ => true)
+      match np.head?, np.getLast? with
+      | some (.w _), some (.m [.id _]) => some (.noun np, r.drop np.length)
+      | _, _ => none)
   | none, none =>
     match kw [w!"for", w!"a"] cs, kw [w!"for", w!"an"] cs with
     | some r, _ | none, some r =>
@@ -266,9 +274,18 @@ def binder (cs : List Chunk) : Option (Bind × List Chunk) :=
           some (.on m, r')
         | none =>
           match kw [w!"if"] cs with
-          | some r => do
-            let (m, r') ← formula r
-            some (.ifCond m, r')
+          | some r =>
+            -- `If $C$ is an LTD copula,`: as `For an LTD copula $C$,`
+            (do
+              let (ts, r1) ← mathChunk r
+              let v ← match ts with | [.id v] => some v | _ => none
+              let r2 ← kw [w!"is", w!"a"] r1 <|> kw [w!"is", w!"an"] r1
+              let ws := r2.takeWhile (fun c => match c with | .w _ | .p 45 => true | _ => false)
+              if ws.isEmpty || (punct 44 (r2.drop ws.length)).isNone then none
+              else some (.noun (ws ++ [.m [.id v]]), r2.drop ws.length)) <|>
+            (do
+              let (m, r') ← formula r
+              some (.ifCond m, r'))
           | none => none
 
 inductive Subj where
@@ -301,8 +318,8 @@ inductive Clause where
   | onlyAttains (x : MT)
   /-- `φ`, possibly `for every x∈A`, possibly `with equality only at x=a`. -/
   | scoped (f : MT) (vars : List Codes) (dom : Option MT) (equalityAt : Option MT)
-  /-- `every NP satisfies|obeys φ`. -/
-  | everyNP (np : List Chunk) (body : MT)
+  /-- `every NP satisfies|obeys φ [for all $u,v\in A$]`. -/
+  | everyNP (np : List Chunk) (body : MT) (inner : List Bind)
   /-- `the maximum V of F is attained only by S[, at which φ][, which RELS]`; without
   `of F` (`the minimum V only by S`), `F` is the function of the preceding extremum. -/
   | extremumOf (isMax : Bool) (value : MT) (f : Option MT) (s : Subj) (at_ : Option MT) (rels : List RelPart)
@@ -612,7 +629,15 @@ def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
       let (np, r1) ← chunksUntil [w!"satisfies", w!"obeys"] r []
       let r2 ← kw [w!"satisfies"] r1 <|> kw [w!"obeys"] r1
       let (body, r3) ← formulaOrDisplay r2
-      some (.everyNP np body, r3)) <|>
+      -- `… satisfies $φ$ for all $u,v\in A$`
+      let (inner, r4) : List Bind × List Chunk := match (do
+          let r' ← kw [w!"for", w!"all"] r3 <|> kw [w!"for", w!"every"] r3 <|> kw [w!"for", w!"each"] r3
+          let (ts, r'') ← mathChunk r'
+          let (vs, d) ← binderMath ts
+          some (Bind.every vs d, r'')) with
+        | some (b, r') => ([b], r')
+        | none => ([], r3)
+      some (.everyNP np body inner, r4)) <|>
     (do
       let (np, r1) ← chunksUntil [w!"is"] r []
       let r2 ← kw [w!"is"] r1
@@ -923,6 +948,10 @@ inductive Sent where
   if COND.`, `$x$ is NAME (ABBR) if COND.`: a notion of the article. `subj` is the noun
   phrase with its variable, or the variable alone (the subject of the previous notion). -/
   | defNotion (subj : List Chunk) (name : List Codes) (abbr : List Codes) (cond : NotionCond)
+  /-- A notion whose condition the grammar does not read (`We call a copula $C$
+  \emph{SI} if its Markov kernel can be chosen such that …`): prose, but its noun
+  phrase is the subject of the notions that follow (`$C$ is \emph{LTD} if …`). -/
+  | notionSubject (subj : List Chunk)
   /-- `Let $C$ be a NP[, and let $u,v\in A$][, and let $X\coloneqq e$, …].`, `Let
   $a,b\in A$, and let $X\coloneqq e$.`: variables of the rest of the result or proof,
   and definitions local to it. -/
@@ -1027,7 +1056,7 @@ def forBinder (cs : List Chunk) : Option (Bind × List Chunk) := do
   let (vs, d) ← binderMath ts
   some (.every vs d, r1)
 
-/-- The condition of a notion: `[, for every $v\in A$,] the map M[,] is MONO`, or
+/-- The condition of a notion: `[, for every $v\in A$,] [the map] M[,] is MONO`, or
 `$φ$ [for all $x\in A$]`. -/
 def notionCond (cs : List Chunk) : Option NotionCond :=
   let cs := optPunct 44 cs
@@ -1037,7 +1066,7 @@ def notionCond (cs : List Chunk) : Option NotionCond :=
         | some r'' => ([b], r'')
         | none => ([], cs)
       | none => ([], cs)
-    let r1 ← kw [w!"the", w!"map"] r <|> kw [w!"the", w!"function"] r
+    let r1 := (kw [w!"the", w!"map"] r <|> kw [w!"the", w!"function"] r).getD r
     let (m, r2) ← (display r1).map (fun (m, _, r') => (m, r')) <|> formula r1
     let r3 ← kw [w!"is"] (optPunct 44 r2)
     let (mono, r4) ← monoWord r3
@@ -1057,15 +1086,25 @@ def notionDef (cs : List Chunk) : Option Sent :=
     let (np, r1) ← nounVar (article r)
     let (name, abbr, r2) ← nameAbbr r1
     let r3 ← kw [w!"if"] r2
-    let cond ← notionCond r3
-    some (.defNotion np name abbr cond)) <|>
+    withCond true np name abbr r3) <|>
   (do
     let (np, r1) ← nounVar (article cs)
-    let r2 ← kw [w!"is", w!"called"] r1 <|> kw [w!"is", w!"said", w!"to", w!"be"] r1 <|> kw [w!"is"] r1
+    let (named, r2) ← ((kw [w!"is", w!"called"] r1 <|> kw [w!"is", w!"said", w!"to", w!"be"] r1).map (true, ·)) <|>
+      ((kw [w!"is"] r1).map (false, ·))
     let (name, abbr, r3) ← nameAbbr r2
     let r4 ← kw [w!"if"] r3
-    let cond ← notionCond r4
-    some (.defNotion np name abbr cond))
+    withCond named np name abbr r4)
+where
+  /-- The notion with its condition, or, when the condition is not read, the
+  sentence is plainly a definition (`We call`, `is called`) and its subject is a
+  noun phrase, the subject alone. -/
+  withCond (named : Bool) (np : List Chunk) (name abbr : List Codes) (r : List Chunk) : Option Sent :=
+    match notionCond r with
+    | some cond => some (.defNotion np name abbr cond)
+    | none =>
+      if named && np.length ≥ 2 && (kw [w!"and", w!"only", w!"if"] r).isNone then
+        some (.notionSubject np)
+      else none
 
 /-- `$x\in A$`, or `$C$ be a|an NP`: the variable of a `let`. -/
 def letBinder (cs : List Chunk) : Option (Bind × List Chunk) :=

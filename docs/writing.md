@@ -102,9 +102,9 @@ abbreviation after a `where`. Proofread reads these where they stand.
 | Form | Example |
 | --- | --- |
 | a notion of an object | `We call a copula $C$ \emph{positively quadrant dependent} (\emph{PQD}) if $C(u,v)\ge uv$ for all $u,v\in[0,1]$.` (the abbreviation in parentheses is optional, and the notion may then be used by either name) |
-| a notion by a monotone map | `A copula $C$ is called \emph{left-tail decreasing} (\emph{LTD}) if, for every $v\in[0,1]$, the map \begin{equation}u\longmapsto\frac{C(u,v)}{u},\qquad u\in(0,1],\end{equation} is non-increasing.` |
+| a notion by a monotone map | `A copula $C$ is called \emph{left-tail decreasing} (\emph{LTD}) if, for every $v\in[0,1]$, the map \begin{equation}u\longmapsto\frac{C(u,v)}{u},\qquad u\in(0,1],\end{equation} is non-increasing.` (`the map` may be left out: `$C$ is \emph{LTD} if, for every $v\in(0,1)$, DISPLAY is non-increasing.`) |
 | the same subject again | `Similarly, $C$ is called \emph{right-tail increasing} (\emph{RTI}) if …` (`$C$` is the copula of the previous notion) |
-| using a notion | `Every LTD copula is PQD.`, `Let $C$ be an LTD copula, and let $u,v\in[0,1]$.`, `$C$ is LTD`, `both LTD and RTI` |
+| using a notion | `Every LTD copula is PQD.`, `Let $C$ be an LTD copula, and let $u,v\in[0,1]$.`, `For every LTD copula $C$, …`, `If $C$ is an LTD copula, then …`, `Every LTD copula $C$ satisfies $C(u,v)\ge uv$ for all $u,v\in[0,1]$.`, `$C$ is LTD`, `both LTD and RTI` |
 | symbols inside a result | `Let $a,b\in(0,\infty)$, and let $A\coloneqq\frac{a+b}{2}$, $G\coloneqq\sqrt{ab}$ and $H\coloneqq\frac{2ab}{a+b}$. Then $H\le G\le A$.` (the symbols belong to the result and its proof, and depend on `a` and `b`) |
 | `where`-clause | `Then $\frac{a+b}{2}-\sqrt{ab}=\frac{d^2}{2}$, where $d\coloneqq\sqrt a-\sqrt b$.` |
 | in apposition | `For $a,b\in(0,\infty)$, the quadratic mean $Q\coloneqq\sqrt{\frac{a^2+b^2}{2}}$ is at least the arithmetic mean $\frac{a+b}{2}$.` |
@@ -117,7 +117,10 @@ is not read, because papers use it in both senses. A symbol defined inside a
 result (`A`, `G`, `H`) is not visible after the result and its proof, so the
 next theorem may define its own `A`. A notion whose condition needs words the
 vocabulary does not have yet (the Markov kernel of a copula, for *stochastically
-increasing*) stays prose, and so do the sentences that use it.
+increasing*) stays prose, and so do the sentences that use it. Its subject
+still counts: after `We call a copula $C$ \emph{stochastically increasing}
+(\emph{SI}) if its Markov kernel can be chosen such that …`, the sentence
+`$C$ is \emph{left-tail decreasing} (\emph{LTD}) if …` defines LTD for copulas.
 
 ## Claims
 

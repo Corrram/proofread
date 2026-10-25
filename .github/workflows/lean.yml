@@ -25,6 +25,10 @@ jobs:
         run: |
           lake exe proofread check examples/Demo/draft.tex > "$RUNNER_TEMP/draft.check.txt" || true
           diff examples/Demo/draft.check.txt "$RUNNER_TEMP/draft.check.txt"
+      - name: Notions defined in the running text are read as documented
+        run: |
+          lake exe proofread check tests/Notions/article.tex --vocab unitsquare --claims > "$RUNNER_TEMP/notions.check.txt"
+          diff tests/Notions/check.txt "$RUNNER_TEMP/notions.check.txt"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"

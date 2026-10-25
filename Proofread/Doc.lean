@@ -319,7 +319,7 @@ def clauseMaths : Clause → List MT
   | .fact f | .holds f => [f]
   | .deriv d _ c => [d, c]
   | .scoped f _ _ e => f :: e.toList
-  | .everyNP _ b => [b]
+  | .everyNP _ b _ => [b]
   | .extremumOf _ v f _ a _ => v :: f.toList ++ a.toList
   | .increasing ms => ms
   | .ranges _ b => [b]
@@ -1208,23 +1208,22 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
     let ay ← conds.mapM (prop sc' (some (.loc 0, sty)))
     let uniq := Tm.all sty (.imp (.app (.glob ni) (.loc 0)) (.imp (conjAll ay) (.eq (.loc 0) (shift 1 0 st))))
     pure (conjAll ([Tm.app (.glob ni) st] ++ atS ++ [uniq]))
-  | .everyNP np body => do
+  | .everyNP np body inner => do
     let mb := match np with
       | [.m ts] => Grammar.binderMath ts
       | _ => none
-    match mb with
-    | some (vs, d) => do
+    let bs ← match mb with
       -- `every $(x,z)\in[0,1]^2$ satisfies φ`
-      let bs ← binderInfos (.every vs d)
-      let p ← prop (scopeOf bs ++ sc) none body
-      recordBounds bs body
-      pure (wrap bs p)
-    | none => do
-      let b ← nounPhrase np
-      if b.name.isEmpty then fail E.unsupported
-      let p ← prop ((b.name, b.ty) :: sc) none body
-      recordBounds [b] body
-      pure (wrap [b] p)
+      | some (vs, d) => binderInfos (.every vs d)
+      | none => do
+        let b ← nounPhrase np
+        if b.name.isEmpty then fail E.unsupported
+        pure [b]
+    -- `… for all $u,v\in A$`, inside
+    let ibs := (← inner.mapM binderInfos).flatten
+    let p ← prop (scopeOf ibs ++ scopeOf bs ++ sc) none body
+    recordBounds (bs ++ ibs) body
+    pure (wrap bs (wrap ibs p))
   | .sharp => do
     let some (bs, ms) := (← get).lastBounds | fail E.referent
     let k := bs.length
@@ -1528,6 +1527,13 @@ def sentence (c : SentCtx) (s : Sent) : M (List Nat × List Nat) := do
     modify fun st => { st with fixed := (c.ctx.sec, bi) :: st.fixed.filter (·.2.name != bi.name) }
     if defs.isEmpty then pure ([], []) else constDefs c (some bi) defs labels
   | .defNotion subj name abbr cond => defNotion subj name abbr cond
+  | .notionSubject subj => do
+    -- only the running text introduces the subject of later notions
+    if c.ctx.kind != .text then fail E.prose
+    let s ← tryCatch (nounPhrase subj) fun _ => fail E.prose
+    if s.name.isEmpty then fail E.prose
+    modify fun st => { st with notionSubject := some s }
+    pure ([], [])
   | .assumeAll binds defs => do
     let bs := (← binds.mapM binderInfos).flatten
     match c.ctx.kind with
@@ -1639,7 +1645,11 @@ def compileOne (envs : List (Codes × Nat)) (c : CState) (s : Sentence) : CState
       let st := match s.ctx.kind with
         | .result _ => { st with resultBinders := saved }
         | _ => st
-      { st, idx := c.idx + 1, outcomesRev := .compiled ds cs :: c.outcomesRev, proofs := ps }
+      -- the subject of an unread notion is kept, and the sentence stays prose
+      let o : Outcome := match sent with
+        | .notionSubject _ => .prose
+        | _ => .compiled ds cs
+      { st, idx := c.idx + 1, outcomesRev := o :: c.outcomesRev, proofs := ps }
     | .error e =>
       let o : Outcome := if e.code == E.prose then .prose else .failed e
       { c with st := st0, idx := c.idx + 1, outcomesRev := o :: c.outcomesRev, proofs := incomplete ps }

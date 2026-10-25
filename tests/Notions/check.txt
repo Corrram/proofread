@@ -1,0 +1,10 @@
+tests/Notions/article.tex:15:1: info: defines \mathcal{C} (copulas)
+tests/Notions/article.tex:16:230: info: defines \operatorname{LTD} (leftTailDecreasing)
+tests/Notions/article.tex:25:1: info: claim 0: \forall x\in [0,1]\to [0,1]\to \mathbb{R},\ \mathcal{C}(x)\land \operatorname{LTD}(x)\Rightarrow (\forall y\in [0,1],\ \forall z\in [0,1],\ y\,z\le x(y)(z))
+tests/Notions/article.tex:29:27: info: claim 1: \forall x\in [0,1]\to [0,1]\to \mathbb{R},\ \mathcal{C}(x)\land \operatorname{LTD}(x)\Rightarrow (\forall y\in [0,1],\ \forall z\in [0,1],\ y\,z\le x(y)(z))
+tests/Notions/article.tex:33:1: info: claim 2: \forall x\in [0,1]\to [0,1]\to \mathbb{R},\ \mathcal{C}(x)\land \operatorname{LTD}(x)\Rightarrow (\forall y\in [0,1],\ \forall z\in [0,1],\ y\,z\le x(y)(z))
+tests/Notions/article.tex:37:1: info: claim 3: \forall x\in [0,1]\to [0,1]\to \mathbb{R},\ \mathcal{C}(x)\land \operatorname{LTD}(x)\Rightarrow (\forall y\in [0,1],\ \forall z\in [0,1],\ y\,z\le x(y)(z))
+tests/Notions/article.tex: 2 definitions, 4 claims
+  text: 2 compiled, 0 failed, 2 prose (of 4)
+  results: 5 compiled, 0 failed, 0 prose (of 5)
+  all: 7 compiled, 0 failed, 2 prose (of 9)

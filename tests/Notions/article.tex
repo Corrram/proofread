@@ -1,0 +1,40 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\newtheorem{proposition}{Proposition}
+\newcommand{\CC}{\mathcal{C}}
+
+% A test of notions defined in the running text (docs/writing.md): `\(…\)` math,
+% a notion whose condition is not read (its subject still counts), a notion by a
+% monotone map without "the map", and four ways of using a notion in a result.
+% The expected output of `proofread check --vocab unitsquare --claims` is check.txt.
+
+\begin{document}
+
+\section{Notions}
+
+Let $\CC$ denote the class of bivariate copulas.
+We call a copula \(C\) \emph{stochastically increasing} (\emph{SI}) if its Markov kernel has a version such that, for every \(v\in(0,1)\), the map \(t\mapsto K_C(t,[0,v])\) is non-increasing. We also use a classical tail notion. \(C\) is \emph{left-tail decreasing} (\emph{LTD}) if, for every \(v\in(0,1)\),
+\begin{equation}\label{eq:ltd}
+u\longmapsto\frac{C(u,v)}{u},\qquad u\in(0,1],
+\end{equation}
+is non-increasing.
+
+\section{Using the notion}
+
+\begin{proposition}
+For every LTD copula $C$, $C(u,v)\ge uv$ for all $u,v\in[0,1]$.
+\end{proposition}
+
+\begin{proposition}
+Let $C$ be an LTD copula. Then $C(u,v)\ge uv$ for all $u,v\in[0,1]$.
+\end{proposition}
+
+\begin{proposition}
+If $C$ is an LTD copula, then $C(u,v)\ge uv$ for all $u,v\in[0,1]$.
+\end{proposition}
+
+\begin{proposition}
+Every LTD copula $C$ satisfies $C(u,v)\ge uv$ for all $u,v\in[0,1]$.
+\end{proposition}
+
+\end{document}
