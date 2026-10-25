@@ -308,6 +308,9 @@ Note/article.tex:44:1: warning: proof step (claim 6) compiled but not verified: 
 
 ![The PDF with \usepackage[status]{proofread}: Lemma 1 is derived, Theorem 2 is marked false, Corollary 3 is compiled but not verified](images/demo-pdf-refuted.png)
 
+The [live demo](demo.md) has the web reader of this draft and of the finished
+note.
+
 ## 7. Fix the statement
 
 The theorem should say `$f(x)\ge2$`. After the edit, `prepare` and the
@@ -380,4 +383,4 @@ verified or is refuted.
 
 For longer articles, `prepare --cache` splits the kernel's work by section
 ([From the `.tex` file to the certificate](pipeline.md)). Two research articles
-compiled this way are listed in the [README](../README.md#exemplars).
+compiled this way are listed on the [home page](index.md#research-articles).

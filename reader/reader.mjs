@@ -198,7 +198,7 @@ export function coverage(report) {
 export function renderCompiledArticle({source, bibliography = '', report, config = {}, figureURL = x => x, sourceURL = '', sourceDate = ''}) {
   validateReport(report, source);
   const article = parseArticle(markSentences(source, report), bibliography, {referenceChoices: config.referenceChoices ?? {}});
-  let html = renderArticle(article, {definitions: config.definitions ?? {}, figureURL, sourceURL, sourceDate,
+  let html = renderArticle(article, {definitions: config.definitions ?? {}, figureURL, sourceURL, sourceDate, verificationAnchor: 'lm-summary',
     pageReferences: config.pageReferences ?? {}});
   // markers never belong inside attributes (titles, contents links)
   html = html.replace(/="([^"]*)"/g, (m, v) => /[-]/.test(v) ? `="${v.replace(/\d+|\d+/g, '')}"` : m);

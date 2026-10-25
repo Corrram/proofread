@@ -1,0 +1,28 @@
+/* Typography of a reader page built on its own by reader/build.mjs. A site that
+   embeds the reader (lean-verifications) brings its own article styles. */
+body.lm-compiled { font-family: "STIX Two Text", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 17px; line-height: 1.6; }
+body.lm-compiled a { color: var(--lm-companion); text-decoration: none; }
+body.lm-compiled a:hover { text-decoration: underline; }
+.lm-bar, .lm-summary, .lm-inspector { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.lm-bar { font-size: .92rem; }
+.lm-summary, .lm-inspector { font-size: .9rem; line-height: 1.5; }
+.lm-summary p { margin: .4rem 0; }
+.mirror-full-article { max-width: 44rem; }
+.article-title { margin: 1.5rem 0 1.2rem; }
+.article-title h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .4rem; }
+.article-title p { margin: .15rem 0; color: var(--lm-muted); }
+.article-contents { margin: .5rem 0 1.2rem; color: var(--lm-muted); font-size: .92rem; }
+.mirror-full-article h2 { font-size: 1.3rem; margin: 2rem 0 .6rem; }
+.article-paragraph p { margin: .6rem 0; }
+.article-result, .article-proof { margin: 1rem 0; }
+.article-result > h3, .article-proof > h4 { display: inline; font-size: 1rem; margin: 0 .35em 0 0; }
+.article-proof > h4 { font-weight: 400; font-style: italic; }
+.article-result > h3 + .article-paragraph, .article-result > h3 + .article-paragraph > p:first-child,
+.article-proof > h4 + .article-paragraph, .article-proof > h4 + .article-paragraph > p:first-child { display: inline; }
+.article-result:is([data-result-kind="theorem"], [data-result-kind="lemma"], [data-result-kind="corollary"],
+  [data-result-kind="proposition"]) .article-paragraph { font-style: italic; }
+.article-qed { float: right; color: var(--lm-muted); }
+.article-proof::after { content: ""; display: block; clear: both; }
+.article-bibliography { margin-top: 2rem; font-size: .92rem; }
+.article-bibliography:has(ol:empty) { display: none; }

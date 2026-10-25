@@ -1,0 +1,93 @@
+# The documentation site, https://corrram.github.io/proofread/
+#
+#   npm ci && npm run demos              # the web readers of the example articles, into docs/demo/
+#   pip install -r requirements-docs.txt
+#   mkdocs serve                         # or: mkdocs build --strict (into _site/)
+#
+# .github/workflows/pages.yml builds and publishes it from main.
+site_name: Proofread
+site_description: Mathematical articles in LaTeX, compiled and checked by Lean
+site_url: https://corrram.github.io/proofread/
+repo_url: https://github.com/Corrram/proofread
+repo_name: Corrram/proofread
+edit_uri: edit/main/docs/
+copyright: Apache-2.0 · Marcus Rockel
+docs_dir: docs
+site_dir: _site
+
+nav:
+  - Home: index.md
+  - Tutorial: getting-started.md
+  - Live demo: demo.md
+  - Guide:
+      - Writing for Proofread: writing.md
+      - Vocabularies and models: vocabularies.md
+  - Reference:
+      - Commands and files: reference.md
+      - From the .tex file to the certificate: pipeline.md
+  - Status and roadmap: roadmap.md
+
+theme:
+  name: material
+  language: en
+  favicon: images/favicon.svg
+  icon:
+    logo: material/file-certificate-outline
+    repo: fontawesome/brands/github
+  font:
+    text: Source Sans 3
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - stylesheets/extra.css
+
+hooks:
+  - scripts/docs_hooks.py
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+validation:
+  omitted_files: warn
+  absolute_links: info
+  unrecognized_links: warn
+  anchors: warn

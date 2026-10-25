@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Build the single-text reader of a certified article:
 //
-//   node reader/build.mjs path/to/article.tex [--bbl article.bbl] [--title "…"] [--out dir]
+//   node reader/build.mjs path/to/article.tex [--bbl article.bbl] [--title "…"] [--out dir] [--home URL]
 //
 // reads `article.tex` and the report `article.proofread.json` that
 // `#proofread_certify` wrote next to it, and writes `dir/index.html` (default
 // `article-reader/` next to the article) with its stylesheets, script and KaTeX
 // fonts. The page renders the article from its source, with the status of every
-// sentence; nothing in it is written by hand.
+// sentence; nothing in it is written by hand. `--home` adds a link back to a
+// page of yours (the documentation site links its demos to itself).
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -21,7 +22,7 @@ const option = name => {
 };
 const texPath = args.find((a, i) => !a.startsWith('--') && (i === 0 || !args[i - 1].startsWith('--')));
 if (!texPath) {
-  console.error('usage: node reader/build.mjs ARTICLE.tex [--bbl FILE.bbl] [--title TITLE] [--date YYYY-MM-DD] [--out DIR]');
+  console.error('usage: node reader/build.mjs ARTICLE.tex [--bbl FILE.bbl] [--title TITLE] [--date YYYY-MM-DD] [--out DIR] [--home URL]');
   process.exit(2);
 }
 const source = fs.readFileSync(texPath, 'utf8');
@@ -39,8 +40,9 @@ const out = option('--out') ?? path.join(path.dirname(texPath), 'article-reader'
 const html = renderCompiledReader({
   title, source, bibliography, report, config: {}, sourceDate: option('--date') ?? '',
   figureURL: image => image, sourceURL: path.basename(texPath),
-  assets: {styles: ['katex/katex.min.css', 'reader.css'], script: 'reader.js'},
-  links: [{href: path.basename(texPath), label: 'Source'}, {href: path.basename(reportPath), label: 'Report'}],
+  assets: {styles: ['katex/katex.min.css', 'reader.css', 'standalone.css'], script: 'reader.js'},
+  links: [...(option('--home') ? [{href: option('--home'), label: 'Documentation'}] : []),
+    {href: path.basename(texPath), label: 'Source'}, {href: path.basename(reportPath), label: 'Report'}],
   declarationURL: () => null,
   intro: `This page renders <code>${path.basename(texPath)}</code>, the text that the Lean kernel compiled. ` +
     'Each marker reports what the certificate checked for its sentence.',
@@ -51,6 +53,7 @@ fs.writeFileSync(path.join(out, 'index.html'), html);
 fs.copyFileSync(texPath, path.join(out, path.basename(texPath)));
 fs.copyFileSync(reportPath, path.join(out, path.basename(reportPath)));
 fs.copyFileSync(path.join(here, 'reader.css'), path.join(out, 'reader.css'));
+fs.copyFileSync(path.join(here, 'standalone.css'), path.join(out, 'standalone.css'));
 fs.copyFileSync(path.join(here, 'reader.js'), path.join(out, 'reader.js'));
 const katex = path.join(here, '..', 'node_modules', 'katex', 'dist');
 fs.copyFileSync(path.join(katex, 'katex.min.css'), path.join(out, 'katex', 'katex.min.css'));

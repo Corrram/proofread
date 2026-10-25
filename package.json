@@ -2,6 +2,9 @@
   "name": "proofread-reader",
   "private": true,
   "type": "module",
-  "scripts": {"test": "node --test tests/*.test.mjs"},
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "demos": "node reader/build.mjs examples/Demo/article.tex --out docs/demo/note --home ../../demo/ && node reader/build.mjs tests/Refuted/article.tex --out docs/demo/refuted --home ../../demo/ && node reader/build.mjs examples/Squares/article.tex --out docs/demo/squares --home ../../demo/"
+  },
   "dependencies": {"katex": "0.18.7"}
 }

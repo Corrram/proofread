@@ -1,5 +1,7 @@
 # Proofread
 
+**[Documentation, tutorial and live demo](https://corrram.github.io/proofread/)**
+
 One LaTeX source, read twice: typeset as the paper you submit, and compiled by
 Lean into kernel-checked statements and proofs.
 
@@ -126,6 +128,7 @@ complete example.
 | `examples/`, `tests/Refuted` | The example articles of the documentation, certified in CI |
 | `reader/` | The web reader: the article rendered from its source with the status of every sentence |
 | `tex/proofread.sty` | Optional margin marks in the PDF (`\usepackage[status]{proofread}`) |
+| `docs/`, `mkdocs.yml` | The documentation site, https://corrram.github.io/proofread/ |
 | `scripts/proofread_diagnostics.py` | Findings from the certificate report, for editors and CI |
 
 ## Build
@@ -135,6 +138,16 @@ lake exe cache get
 lake build
 npm ci && npm test
 ```
+
+The documentation site is `docs/` with `mkdocs.yml`:
+
+```sh
+npm run demos                          # the readers of the example articles, into docs/demo/
+pip install -r requirements-docs.txt
+mkdocs serve
+```
+
+`.github/workflows/pages.yml` publishes it from `main`.
 
 Lean 4.34.0 with the mathlib revision in `lake-manifest.json`. The generic code
 is licensed under Apache-2.0.
