@@ -42,7 +42,7 @@ Two articles are compiled in
 
 * *Rank weighting and asymmetry in Blest's rank correlation: two exact regions*
   (arXiv:2609.27634), `Papers/Rockel2026ExactBlest/Source`: 37 definitions and
-  47 claims, all certified. The proof of Corollary 3.2 is checked sentence by
+  48 claims, all certified. The proof of Corollary 3.2 is checked sentence by
   sentence against what it cites; the other results are proved through bridges to
   the companion development.
 * *The exact region determined by Spearman's rho and Gini's gamma*

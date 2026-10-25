@@ -40,7 +40,7 @@ The kernel's work is split so that an edit is checked where it happened:
   a separate kernel check, and composed by explicit proof terms.
 
 For the Blest article (90 blocks in 5 sections, 351 sentences, 37 definitions
-and 47 claims) the kernel-checked compilation takes about 70 s with the lexing
+and 48 claims) the kernel-checked compilation takes about 70 s with the lexing
 cache and peaks at 2.6 GB, and stating its semantics another 30 s. After an
 edit, the cache modules of the unchanged sections are reused.
 `set_option proofread.timing "file"` records the time of every stage.
