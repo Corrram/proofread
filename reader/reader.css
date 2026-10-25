@@ -1,13 +1,13 @@
 /* Single-text reader: sentence markers and the inspector. Works beside the site's own stylesheet. */
 :root {
   --lm-text: #1b7f3b; --lm-companion: #2563b8; --lm-definition: #7a3fb0; --lm-unverified: #b86b00;
-  --lm-failed: #c0352b; --lm-prose: #9aa0a6; --lm-bg: #ffffff; --lm-fg: #1d2125; --lm-muted: #5f6670;
+  --lm-binder: #8b7f99; --lm-failed: #c0352b; --lm-prose: #9aa0a6; --lm-bg: #ffffff; --lm-fg: #1d2125; --lm-muted: #5f6670;
   --lm-line: #e2e5e9; --lm-panel: #f7f8fa; --lm-hl: rgba(27, 127, 59, .16); --lm-hover: rgba(37, 99, 184, .10);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --lm-text: #4cc66f; --lm-companion: #6aa5ff; --lm-definition: #c28cf0; --lm-unverified: #f0a33c;
-    --lm-failed: #ff6f61; --lm-prose: #7b828a; --lm-bg: #15181b; --lm-fg: #e6e8ea; --lm-muted: #a5acb4;
+    --lm-binder: #a99bb8; --lm-failed: #ff6f61; --lm-prose: #7b828a; --lm-bg: #15181b; --lm-fg: #e6e8ea; --lm-muted: #a5acb4;
     --lm-line: #2c3136; --lm-panel: #1c2024; --lm-hl: rgba(76, 198, 111, .22); --lm-hover: rgba(106, 165, 255, .16);
   }
 }
@@ -29,9 +29,11 @@ button.lm-dot:focus-visible { outline: 2px solid var(--lm-companion); outline-of
 button.lm-dot[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--lm-hl); }
 .lm-dot.lm-text { background: var(--lm-text); } .lm-dot.lm-companion { background: var(--lm-companion); }
 .lm-dot.lm-definition { background: var(--lm-definition); } .lm-dot.lm-unverified { background: var(--lm-unverified); }
+.lm-dot.lm-binder { background: var(--lm-binder); }
 .lm-dot.lm-failed { background: var(--lm-failed); border-radius: 2px; } .lm-dot.lm-prose { background: transparent; box-shadow: inset 0 0 0 1.5px var(--lm-prose); }
 body.lm-hide-text .lm-dot.lm-text[data-sentence], body.lm-hide-companion .lm-dot.lm-companion[data-sentence],
 body.lm-hide-definition .lm-dot.lm-definition[data-sentence], body.lm-hide-unverified .lm-dot.lm-unverified[data-sentence],
+body.lm-hide-binder .lm-dot.lm-binder[data-sentence],
 body.lm-hide-failed .lm-dot.lm-failed[data-sentence], body.lm-hide-prose .lm-dot.lm-prose[data-sentence] { display: none; }
 ::highlight(lm-active) { background-color: var(--lm-hl); }
 ::highlight(lm-hover) { background-color: var(--lm-hover); }
@@ -41,6 +43,7 @@ body.lm-hide-failed .lm-dot.lm-failed[data-sentence], body.lm-hide-prose .lm-dot
 .lm-status { font-weight: 600; margin: 4px 0; }
 .lm-status.lm-text { color: var(--lm-text); } .lm-status.lm-companion { color: var(--lm-companion); }
 .lm-status.lm-definition { color: var(--lm-definition); } .lm-status.lm-unverified { color: var(--lm-unverified); }
+.lm-status.lm-binder { color: var(--lm-binder); }
 .lm-status.lm-failed { color: var(--lm-failed); } .lm-status.lm-prose { color: var(--lm-muted); }
 .lm-message { color: var(--lm-failed); }
 .lm-claim { border-top: 1px solid var(--lm-line); padding-top: 8px; margin-top: 10px; }

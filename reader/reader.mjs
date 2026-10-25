@@ -15,6 +15,7 @@ export const statusText = {
   text: 'Derived from its citations',
   companion: 'Checked by the companion development',
   definition: 'Definition, well defined',
+  binder: 'Binds a variable',
   unverified: 'Compiled, not yet verified',
   failed: 'Not compiled',
   prose: 'Prose, not compiled',
@@ -59,6 +60,8 @@ export function sentenceStatus(report, s) {
   if (statuses.includes('unverified')) return 'unverified';
   if (statuses.includes('companion')) return 'companion';
   if (statuses.includes('text')) return 'text';
+  // `fix $b\in B$.`, `Let $w\in A$.`: no definition and no claim
+  if (!(s.definitions ?? []).length && !(s.claims ?? []).length) return 'binder';
   return 'definition';
 }
 
@@ -218,7 +221,7 @@ export function renderCompiledReader({title, source, bibliography, report, confi
   const proved = [...new Map(report.claims.filter(cl => cl.role === 'statement' && cl.premises.length)
     .map(cl => [report.sentences[cl.sentence].env, cl.sentence])).values()]
     .map(k => `<button type="button" class="lm-jump" data-sentence="${k}"><span class="lm-dot lm-text" aria-hidden="true"></span>${escape(report.sentences[k].environment)} · line ${report.sentences[k].line}</button>`);
-  const legend = ['text', 'companion', 'definition', 'unverified', 'failed', 'prose'].map(st =>
+  const legend = ['text', 'companion', 'definition', 'binder', 'unverified', 'failed', 'prose'].map(st =>
     `<label class="lm-filter"><input type="checkbox" data-filter="${st}" checked><span class="lm-dot lm-${st}" aria-hidden="true"></span>${escape(statusText[st])}</label>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)} · Proofread</title>

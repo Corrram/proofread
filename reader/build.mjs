@@ -21,7 +21,7 @@ const option = name => {
 };
 const texPath = args.find((a, i) => !a.startsWith('--') && (i === 0 || !args[i - 1].startsWith('--')));
 if (!texPath) {
-  console.error('usage: node reader/build.mjs ARTICLE.tex [--bbl FILE.bbl] [--title TITLE] [--out DIR]');
+  console.error('usage: node reader/build.mjs ARTICLE.tex [--bbl FILE.bbl] [--title TITLE] [--date YYYY-MM-DD] [--out DIR]');
   process.exit(2);
 }
 const source = fs.readFileSync(texPath, 'utf8');
@@ -37,7 +37,7 @@ const title = option('--title') ?? (source.match(/\\title\{([^}]*)\}/)?.[1] ?? p
 const out = option('--out') ?? path.join(path.dirname(texPath), 'article-reader');
 
 const html = renderCompiledReader({
-  title, source, bibliography, report, config: {},
+  title, source, bibliography, report, config: {}, sourceDate: option('--date') ?? '',
   figureURL: image => image, sourceURL: path.basename(texPath),
   assets: {styles: ['katex/katex.min.css', 'reader.css'], script: 'reader.js'},
   links: [{href: path.basename(texPath), label: 'Source'}, {href: path.basename(reportPath), label: 'Report'}],

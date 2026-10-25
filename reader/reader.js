@@ -56,6 +56,7 @@
       <p class="lm-status lm-${d.status}">${esc(d.label)}</p><button type="button" class="lm-close" aria-label="Close">×</button></header>
       ${d.message ? `<p class="lm-message">${esc(d.message)}</p>` : ''}
       ${d.status === 'prose' ? '<p class="lm-small">The fixed grammar does not read this sentence yet, so it makes no checked claim.</p>' : ''}
+      ${d.status === 'binder' ? '<p class="lm-small">The variable stays bound in the following sentences of the result (or, in the running text, of the section).</p>' : ''}
       ${d.definitions.map(definitionHTML).join('')}${d.claims.map(claimHTML).join('')}`;
     panel.classList.add('lm-open');
     history.replaceState(null, '', '#sentence-' + (Number(k) + 1));

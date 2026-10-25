@@ -35,13 +35,22 @@ becomes `claim14 : ∀ x : I → I → ℝ, copulas x → |nu x - rho x| ≤ 1 /
 derived in Lean from exactly the sentences of its proof and the results they
 cite.
 
-## The exemplar
+## Exemplars
 
-*Rank weighting and asymmetry in Blest's rank correlation: two exact regions*
-(arXiv:2609.27634) is compiled in
-[lean-verifications](https://github.com/Corrram/lean-verifications)
-(`Papers/Rockel2026ExactBlest/Source`). Its `article-edits.diff` lists every
-edit the conventions asked for. See its README for the current coverage.
+Two articles are compiled in
+[lean-verifications](https://github.com/Corrram/lean-verifications):
+
+* *Rank weighting and asymmetry in Blest's rank correlation: two exact regions*
+  (arXiv:2609.27634), `Papers/Rockel2026ExactBlest/Source`: 37 definitions and
+  47 claims, all certified. The proof of Corollary 3.2 is checked sentence by
+  sentence against what it cites; the other results are proved through bridges to
+  the companion development.
+* *The exact region determined by Spearman's rho and Gini's gamma*
+  (arXiv:2609.19890), `Papers/AnsariRockelSteinmassl2026RhoGamma/Source`: 11
+  definitions and 8 claims, all certified.
+
+Each folder's `article-edits.diff` lists every edit the conventions asked for,
+and its README the coverage: which sentences compiled, and which are still prose.
 
 ## Use
 
