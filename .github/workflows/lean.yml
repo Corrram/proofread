@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Every claim of the example is verified
-        run: python scripts/proofread_diagnostics.py examples/Squares/article.proofread.json --strict
+        run: python scripts/proofread_diagnostics.py examples/Squares/article.proofread.json --strict --verified
       - uses: actions/setup-node@v6
         with:
           node-version: "24"

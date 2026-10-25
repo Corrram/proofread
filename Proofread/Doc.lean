@@ -287,6 +287,7 @@ def clauseMaths : Clause → List MT
   | .extremumOf _ v f _ a _ => v :: f.toList ++ a.toList
   | .increasing ms => ms
   | .ranges _ b => [b]
+  | .extremaOver items f _ _ cond => items.map (·.2) ++ [f, cond]
   | .increases f a b => [f, a, b]
   | .sends m f g => [m, f, g]
   | _ => []
@@ -781,6 +782,32 @@ def defClass (sym : MT) (plural : List Codes) (np : List Chunk) : M (List Nat ×
 def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Option MT) :
     Clause → M Tm
   | .fact f | .holds f => prop sc none f
+  | .extremaOver items f noun v cond => do
+    -- the class: the noun as written, or its singular
+    let sing := noun.dropLast ++ (noun.getLast?.map singular).toList
+    let nouns := (← get).nouns
+    let some ni := (lookupWords nouns noun).orElse (fun _ => lookupWords nouns sing)
+      | fail E.noun noun.flatten
+    let gty : Option Ty := ((← get).globs[ni]?).map (·.ty)
+    let ty ← match gty with
+      | some (.fn a .prop) => pure a
+      | _ => fail E.type
+    let p := Tm.glob ni
+    -- `F` and `φ` about one element (`loc 0`), and about a second one (`loc 0`, the first `loc 1`)
+    let sx := (v, ty) :: sc
+    let fx ← asReal (← term F sx none f)
+    let cx ← prop sx none cond
+    let sy := (v, ty) :: (w!"", ty) :: sc
+    let fy ← asReal (← term F sy none f)
+    let cy ← prop sy none cond
+    let parts ← items.mapM fun (isMax, x) => do
+      let xv ← asReal (← term F sc none x)
+      let x1 := shift 1 0 xv
+      let x2 := shift 2 0 xv
+      let bound := Tm.all ty (.imp (.app p (.loc 0)) (.imp cx (if isMax then .le fx x1 else .le x1 fx)))
+      let uniq := Tm.all ty (.imp (.app p (.loc 0)) (.imp cy (.imp (.eq fy x2) (.eq (.loc 0) (.loc 1)))))
+      pure (Tm.and bound (.ex ty (Elab.conjAll [.app p (.loc 0), cx, .eq fx x1, uniq])))
+    pure (Elab.conjAll parts)
   | .every vs d body => do
     let bs ← binderInfos (.every vs d)
     let p ← prop (scopeOf bs ++ sc) none body

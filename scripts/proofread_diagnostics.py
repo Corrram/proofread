@@ -4,12 +4,13 @@
 `#proofread_certify` writes `<article>.proofread.json` next to the article. This script
 prints one line per finding in the format editors understand:
 
-    article.tex:201:5: error: undefined symbol: \\Upsilon
-    article.tex:458:1: warning: claim 12 compiled but not verified
+    article.tex:694:1: warning: sentence not compiled (undefined symbol: \\Delta); it asserts nothing checked
+    article.tex:458:1: warning: statement (claim 12) compiled but not verified: add J.proof12
 
 Use it in CI or as a VS Code task (see `editors/vscode/tasks.json`). Exit status
-is 1 if a sentence failed to compile, (with --strict) a claim is unverified, or
-the article changed after the report was written. `--pin Compiled.lean` updates
+is 1 if the article changed after the report was written, with --verified if a
+compiled claim is not verified, and with --strict on any warning (also sentences
+that did not compile). `--pin Compiled.lean` updates
 the article's pin in that Lean file, so that Lake recompiles the article.
 """
 import argparse
@@ -44,7 +45,7 @@ def findings(report, prose=False):
     for s in sentences:
         where = (s["line"], s["column"])
         if s["outcome"] == "failed":
-            yield (*where, "error", f"Proofread could not compile this sentence: {s['message']}")
+            yield (*where, "warning", f"sentence not compiled ({s['message']}); it asserts nothing checked")
         elif s["outcome"] == "prose" and prose and s["environment"] != "text":
             yield (*where, "info", f"not read by the grammar ({s['environment']}); this sentence makes no checked claim")
     for c in report["claims"]:
@@ -61,7 +62,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("report", type=pathlib.Path, help="the article's .proofread.json")
     ap.add_argument("--prose", action="store_true", help="also list uncompiled sentences in results and proofs")
-    ap.add_argument("--strict", action="store_true", help="fail on unverified claims as well")
+    ap.add_argument("--verified", action="store_true",
+                    help="fail if a compiled claim is not verified")
+    ap.add_argument("--strict", action="store_true",
+                    help="fail on any warning: unverified claims and sentences that did not compile")
     ap.add_argument("--relative-to", type=pathlib.Path, default=pathlib.Path.cwd(),
                     help="print paths relative to this directory (default: the working directory)")
     ap.add_argument("--pin", type=pathlib.Path, metavar="LEAN_FILE",
@@ -94,7 +98,8 @@ def main():
           f"({count('text')} derived from citations, {count('companion')} by companion proofs, "
           f"{count('unverified')} unverified), {len(report['definitions'])} definitions; "
           f"{errors} errors, {warnings} warnings", file=sys.stderr)
-    return 1 if errors or (args.strict and warnings) else 0
+    unverified = count('unverified')
+    return 1 if errors or (args.strict and warnings) or (args.verified and unverified) else 0
 
 
 if __name__ == "__main__":

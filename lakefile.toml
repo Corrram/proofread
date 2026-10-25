@@ -17,7 +17,7 @@ rev = "5ed2965256430c3649e86755f9576b54eca72435"
 
 [[lean_lib]]
 name = "Proofread"
-globs = ["Proofread.+"]
+globs = ["Proofread.*"]
 
 [[lean_exe]]
 name = "proofread"

@@ -285,6 +285,10 @@ inductive Clause where
   | increasing (maps : List MT)
   /-- `the first|second ranges over B`: the image of a map of the preceding sentence. -/
   | ranges (which : Nat) (target : MT)
+  /-- `the maximum X [and the minimum Y] of F over all NOUNS $C$ with φ are each
+  attained by exactly one NOUN`: each value is the extremum of `F` over the
+  elements with `φ`, attained by exactly one of them. -/
+  | extremaOver (items : List (Bool × MT)) (f : MT) (noun : List Codes) (v : Codes) (cond : MT)
   deriving Repr, Inhabited
 
 /-- A clause with the citations that justify it, and its own binders
@@ -388,6 +392,33 @@ def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
         let (b, r3) ← formula r2
         some (Clause.ranges k b, r3)
       | _ => none) with
+  | some res => some res
+  | none =>
+  -- the maximum X [and the minimum Y] of F over all NOUNS $C$ with φ are each attained by exactly one NOUN
+  match (do
+      let item (r : List Chunk) : Option ((Bool × MT) × List Chunk) := do
+        let r1 ← kw [w!"the"] r
+        let (isMax, r2) ← (kw [w!"maximum"] r1).map (true, ·) <|> (kw [w!"minimum"] r1).map (false, ·)
+        let (x, r3) ← formula r2
+        some ((isMax, x), r3)
+      let (i1, r1) ← item cs
+      let (items, r2) : List (Bool × MT) × List Chunk := match (kw [w!"and"] r1).bind item with
+        | some (i2, r') => ([i1, i2], r')
+        | none => ([i1], r1)
+      let r3 ← kw [w!"of"] r2
+      let (f, r4) ← formula r3
+      let r5 ← kw [w!"over", w!"all"] r4
+      let ws := r5.takeWhile (fun (c : Chunk) => match c with | .w _ => true | _ => false)
+      let noun := ws.filterMap (fun (c : Chunk) => match c with | .w w => some w | _ => none)
+      let (vt, r6) ← mathChunk (r5.drop ws.length)
+      let v ← match vt with | [.id v] => some v | _ => none
+      let r7 ← kw [w!"with"] r6
+      let (cond, r8) ← formula r7
+      let r9 ← kw [w!"are", w!"each", w!"attained", w!"by", w!"exactly", w!"one"] r8 <|>
+        kw [w!"is", w!"attained", w!"by", w!"exactly", w!"one"] r8
+      let ws2 := r9.takeWhile (fun (c : Chunk) => match c with | .w _ => true | _ => false)
+      if ws2.isEmpty then none else some (Clause.extremaOver items f noun v cond, r9.drop ws2.length) :
+        Option (Clause × List Chunk)) with
   | some res => some res
   | none =>
   -- exactly one N $x$ with $φ$ satisfies $ψ$

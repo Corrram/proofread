@@ -39,8 +39,10 @@ The kernel's work is split so that an edit is checked where it happened:
 * **Sentences** are compiled in chunks (`set_option proofread.chunk 8`), each
   a separate kernel check, and composed by explicit proof terms.
 
-For the Blest article (90 blocks, 349 sentences) the full compilation takes
-about 80 s and 2.6 GB. After an edit, the unchanged cache modules are reused.
+For the Blest article (90 blocks in 5 sections, 349 sentences, 25 definitions
+and 41 claims) the kernel-checked compilation takes about 70 s with the lexing
+cache and peaks at 2.6 GB, and stating its semantics another 30 s. After an
+edit, the cache modules of the unchanged sections are reused.
 `set_option proofread.timing "file"` records the time of every stage.
 
 ## Definedness
