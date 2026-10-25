@@ -98,7 +98,7 @@ def writeReport (ns jn : Name) (rel : String) (d : Doc) (claims : Array ClaimInf
   let nm (s : String) : Name := Name.mkSimple s
   let names := (List.range d.values.length).map (defName d)
   let gTex := d.globNames
-  let V ← liftCoreM <| evalVocab (ns ++ `vocab)
+  let V ← liftCoreM <| articleVocab ns
   let cTex := V.constNames.map Codes.toString
   let short (str : String) : String :=
     ((str.replace (toString ns ++ ".") "").replace "Proofread.Prelude." "").replace "↑unitInterval" "I"

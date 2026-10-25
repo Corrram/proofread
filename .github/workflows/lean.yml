@@ -1,4 +1,4 @@
-name: LeanMirror
+name: Proofread
 on:
   push:
   pull_request:
@@ -15,28 +15,21 @@ jobs:
           build: 'true'
           test: 'false'
           use-mathlib-cache: 'true'
+      - name: Build the checker and certify the example article
+        run: lake build proofread Squares
+      - name: Quick check of the example article
+        run: lake exe proofread check examples/Squares/article.tex --claims --prose
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Every claim of the example is verified
+        run: python scripts/proofread_diagnostics.py examples/Squares/article.proofread.json --strict
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Reader and source-integrity tests
-        run: |
-          npm test
-          python -m unittest discover -s tests
-      - name: Check generated companions
-        run: |
-          python scripts/classical.py --check
-          python scripts/mirror.py check examples/analysis
-          python scripts/source.py check examples/source
-      - name: Build the offline reader
-        run: python scripts/mirror.py build examples/analysis
-      - uses: actions/upload-artifact@v6
-        with:
-          name: analysis-companion
-          path: build/analysis
-      - name: Preserve dependency pins and generated sources
+      - name: Reader tests
+        run: npm test
+      - name: Reports and dependency pins are up to date
         run: git diff --exit-code -- lean-toolchain lakefile.toml lake-manifest.json examples

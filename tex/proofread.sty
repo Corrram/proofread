@@ -32,7 +32,8 @@
 \newcommand*\proofreadstatus[2]{\expandafter\gdef\csname proofread@st@#1\endcsname{#2}}
 \newcommand*\proofreadsummary[6]{%
   \gdef\proofread@summary{#2 of #1 claims verified (#3 derived in the text from
-    their citations); #5 of #6 sentences compiled; #4 definitions well defined}}
+    their citations); #5 of #6 sentences compiled; #4
+    \ifnum#4=1 definition\else definitions\fi\ well defined}}
 \newcommand*\proofread@summary{no status file (build the Lean module first)}
 \newcommand*\proofreadreport{\textsf{Proofread:} \proofread@summary.}
 

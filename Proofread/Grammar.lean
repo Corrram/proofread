@@ -672,20 +672,45 @@ def constDefsOf (b : Option Bind) (cs : List Chunk) : Option Sent := do
   let (items, ls, r) ← defList 6 cs [] []
   if isEnd (trailer r) && !items.isEmpty && items.all isDefeq then some (.constDefs b items ls) else none
 
+/-- `class of [all]`, `set of [all]`. -/
+def classOf (cs : List Chunk) : Option (List Chunk) := do
+  let r ← kw [w!"class", w!"of"] cs <|> kw [w!"set", w!"of"] cs
+  some ((kw [w!"all"] r).getD r)
+
 def sentence (cs : List Chunk) : Option Sent :=
   let (topic, cs) := marker cs
   -- let $S$ denote the class of NOUNS, that is, NP.
   match kw [w!"let"] cs with
   | some r => do
     let (sym, r1) ← formula r
-    let r2 ← kw [w!"denote", w!"the", w!"class", w!"of"] r1
+    let r2 ← kw [w!"denote", w!"the"] r1
+    let r2 ← classOf r2
     let (plural, r3) ← wordsUntil [] 6 r2 [] <|> (do
       let ws := r2.takeWhile (fun c => match c with | .w _ => true | _ => false)
       some (ws.filterMap (fun c => match c with | .w w => some w | _ => none), r2.drop ws.length))
+    -- `let $S$ denote the class of NOUNS.`: a class of the vocabulary
+    if isEnd r3 then some (.defClass sym plural []) else do
     let r4 ← punct 44 r3 >>= kw [w!"that", w!"is"] >>= punct 44
     let np := r4.dropLast
     if isEnd (r4.drop np.length) then some (.defClass sym plural np) else none
   | none =>
+  -- `[We] denote by $S$ the class of NOUNS.`, `[We] denote the class of NOUNS by $S$.`
+  let cs1 := (kw [w!"we"] cs).getD cs
+  match kw [w!"denote", w!"by"] cs1, kw [w!"denote", w!"the"] cs1 with
+  | some r, _ => do
+    let (sym, r1) ← formula r
+    let r2 ← kw [w!"the"] r1 >>= classOf
+    let ws := r2.takeWhile (fun c => match c with | .w _ => true | _ => false)
+    let plural := ws.filterMap (fun c => match c with | .w w => some w | _ => none)
+    if isEnd (r2.drop ws.length) && !plural.isEmpty then some (.defClass sym plural []) else none
+  | none, some r => do
+    let r1 ← classOf r
+    let ws := r1.takeWhile (fun c => match c with | .w v => v != w!"by" | _ => false)
+    let plural := ws.filterMap (fun c => match c with | .w w => some w | _ => none)
+    let r2 ← kw [w!"by"] (r1.drop ws.length)
+    let (sym, r3) ← formula r2
+    if isEnd r3 && !plural.isEmpty then some (.defClass sym plural []) else none
+  | none, none =>
   -- define $sig$ by DISPLAY [and observe that $φ$ for every $x\in A$].
   match kw [w!"define"] cs with
   | some r => (do

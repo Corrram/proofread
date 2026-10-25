@@ -602,6 +602,7 @@ where
         let h ← asReal (← term g sc none hi)
         pure (intervalTm l h true true (← asReal x))
       | .id n => do
+        if n == w!"\\mathbb{R}" then do let _ ← asReal x; pure .tt else
         let (i, gl) ← liftO (← lookupGlob n) E.undefined n
         match gl.ty with
         | .fn a .prop => do let x' ← coerce x.1 x.2 a; pure (.app (.glob i) x')

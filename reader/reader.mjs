@@ -213,6 +213,7 @@ export function renderCompiledReader({title, source, bibliography, report, confi
   const body = renderCompiledArticle({source, bibliography, report, config, figureURL, sourceURL, sourceDate});
   const data = JSON.stringify(inspectorData(report, {declarationURL})).replaceAll('<', '\\u003c');
   const c = coverage(report);
+  const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
   // results closed by a compiled proof: their first statement sentence
   const proved = [...new Map(report.claims.filter(cl => cl.role === 'statement' && cl.premises.length)
     .map(cl => [report.sentences[cl.sentence].env, cl.sentence])).values()]
@@ -229,7 +230,7 @@ ${assets.icon ? `<link rel="icon" href="${escape(assets.icon)}" type="image/svg+
 <div class="lm-layout"><main id="lm-article" tabindex="-1">
 <section class="lm-summary" id="lm-summary"><p class="lm-kicker">Single source · compiled by the Lean kernel</p>
 <p>${intro}</p>
-<p>${c.sentences} sentences. ${c.compiled} compiled into ${c.claims} claims and ${c.definitions} definitions. Of the claims, <strong>${c.text} are derived from the results they cite</strong>, ${c.companion} are checked by the companion Lean development, and ${c.unverified} are unverified. ${c.failed} sentences failed to compile; ${c.proseMath} sentences in results and proofs are prose the grammar does not read yet.</p>
+<p>${n(c.sentences, 'sentence')}. ${c.compiled} compiled into ${n(c.claims, 'claim')} and ${n(c.definitions, 'definition')}. Of the claims, <strong>${c.text} ${c.text === 1 ? 'is' : 'are'} derived from the results they cite</strong>, ${c.companion} ${c.companion === 1 ? 'is' : 'are'} checked by the companion Lean development, and ${c.unverified} ${c.unverified === 1 ? 'is' : 'are'} unverified. ${n(c.failed, 'sentence')} failed to compile, and ${n(c.proseMath, 'sentence')} in results and proofs ${c.proseMath === 1 ? 'is' : 'are'} prose the grammar does not read yet.</p>
 ${proved.length ? `<p class="lm-proved">Results whose proof is compiled sentence by sentence: ${proved.join(' · ')}</p>` : ''}
 <fieldset class="lm-legend"><legend>Show markers</legend>${legend}</fieldset></section>
 ${body}</main>

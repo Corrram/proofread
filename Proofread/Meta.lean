@@ -59,6 +59,11 @@ def elabClosed (stx : Term) : CommandElabM (Expr × Expr) := liftTermElabM do
   let e ← instantiateMVars e
   pure (e, ← instantiateMVars (← Meta.inferType e))
 
+/-- The identifier of an optional `with X` clause (an optional node holding the
+keyword and the identifier). -/
+def withClause (s : Syntax) : Option Syntax :=
+  if s.getNumArgs == 2 then some s[1] else none
+
 def kernelEq (n : Name) (lhs rhs : Term) : CommandElabM Unit := do
   let (l, ty) ← elabClosed lhs
   let (r, _) ← elabClosed rhs
@@ -68,6 +73,16 @@ unsafe def evalVocabUnsafe (n : Name) : CoreM Vocab := evalConstCheck Vocab ``Vo
 
 /-- The value of a vocabulary constant (evaluated at elaboration time). -/
 @[implemented_by evalVocabUnsafe] opaque evalVocab (n : Name) : CoreM Vocab
+
+/-- The vocabulary an article was compiled with: `Foo.vocab` is defined by
+`#proofread_article` as the vocabulary constant it was given. -/
+def articleVocab (ns : Name) : CoreM Vocab := do
+  match (← getEnv).find? (ns ++ `vocab) with
+  | some (.defnInfo v) =>
+    match v.value with
+    | .const n _ => evalVocab n
+    | _ => evalVocab (ns ++ `vocab)
+  | _ => throwError "{ns} has no compiled article (no {ns ++ `vocab})"
 
 /-- The literal of a compiler state, with the vocabulary given by a constant
 (so that the vocabulary is not repeated in every literal). -/
@@ -129,8 +144,8 @@ stages (`start`, `preamble`, `paragraphs`, `lex{i}`, `seg{i}`, `segFinished`,
   let ns := stx[1].getId
   let some rel := stx[2].isStrLit? | throwUnsupportedSyntax
   let some pin := stx[3].isStrLit? | throwUnsupportedSyntax
-  let vocabName ← match stx[4].getOptional? with
-    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v[1]
+  let vocabName ← match withClause stx[4] with
+    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v
     | none => pure ``Vocab.core
   let V ← liftCoreM <| evalVocab vocabName
   let path ← liftCoreM (resolvePath rel)
@@ -373,8 +388,8 @@ syntax (name := proofreadCheck) "#proofread_check " str (" with " ident)? : comm
 
 @[command_elab proofreadCheck] def elabProofreadCheck : CommandElab := fun stx => do
   let some rel := stx[1].isStrLit? | throwUnsupportedSyntax
-  let vocabName ← match stx[2].getOptional? with
-    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v[1]
+  let vocabName ← match withClause stx[2] with
+    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v
     | none => pure ``Vocab.core
   let V ← liftCoreM <| evalVocab vocabName
   let path ← liftCoreM (resolvePath rel)

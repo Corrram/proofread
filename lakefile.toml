@@ -22,3 +22,9 @@ globs = ["Proofread.+"]
 [[lean_exe]]
 name = "proofread"
 root = "ProofreadCli"
+
+[[lean_lib]]
+# The smallest complete example: an article compiled, verified and certified.
+name = "Squares"
+srcDir = "examples"
+globs = ["Squares.+"]

@@ -147,7 +147,7 @@ partial def readable (R : RCtx) (ls : List Expr) : Tm → TermElabM Expr
 def nativeDoc (ns : Name) (rel : String) : CommandElabM Doc := do
   let path ← liftCoreM (resolvePath rel)
   let lines ← readLines path
-  let V ← liftCoreM <| evalVocab (ns ++ `vocab)
+  let V ← liftCoreM <| articleVocab ns
   match compileArticle V lines with
   | some d => pure d
   | none => throwError "the article could not be compiled"
@@ -157,8 +157,8 @@ syntax (name := proofreadSemantics) "#proofread_semantics " ident str (" with " 
 @[command_elab proofreadSemantics] def elabProofreadSemantics : CommandElab := fun stx => do
   let ns := stx[1].getId
   let some rel := stx[2].isStrLit? | throwUnsupportedSyntax
-  let modelName ← match stx[3].getOptional? with
-    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v[1]
+  let modelName ← match withClause stx[3] with
+    | some v => liftCoreM <| realizeGlobalConstNoOverloadWithInfo v
     | none => pure ``Model.empty
   checkFresh ns rel
   let d ← nativeDoc ns rel

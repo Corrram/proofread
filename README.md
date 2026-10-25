@@ -75,10 +75,23 @@ import Proofread.Certify
 #proofread_certify Foo "article.tex" using Proofs
 ```
 
+[`examples/Squares`](examples/Squares) is the smallest complete example: a
+one-page article (`article.tex`), the four Lean files above, and the reports
+the certificate writes. `lake build Squares` checks it.
+
 While writing, `lake exe proofread check article.tex --vocab unitsquare
 --claims` compiles the article natively in about a second and prints each
 undefined symbol, each sentence that does not compile, and the formal reading
 of every claim. `editors/vscode/tasks.json` shows the findings in the editor.
+
+The same source gives the two readable outputs:
+
+* the PDF, with `\usepackage{proofread}`, unchanged, or with
+  `\usepackage[status]{proofread}` marking every result in the margin with its
+  verification status (read from `article.proofread.tex`);
+* the web reader, `node reader/build.mjs article.tex`, which renders the
+  article from its source with the status of every sentence and, for each
+  claim, its formal reading, Lean statement, premises and justification.
 
 ## Documentation
 

@@ -133,6 +133,8 @@ def domainOf (calculus : Bool) (d : MT) : M (Ty × Option Tm) := do
       let h ← liftO (Elab.constMT hi) E.unsupported
       pure (.real, some (.lam .real .tt (Elab.intervalTm l h true true (.loc 0))))
     | .id n => do
+      -- the real numbers
+      if n == w!"\\mathbb{R}" then pure (.real, none) else
       let (i, g) ← liftO (← lookupGlob n) E.undefined n
       match g.ty with
       | .fn a .prop => pure (a, some (.glob i))
@@ -162,22 +164,29 @@ def nounPhrase (np : List Chunk) : M BindInfo := do
       | some (m, r) => pre f r (m :: acc)
       | none => (acc.reverse, cs)
   let (pms, r0) := pre 4 np []
-  -- the head: a vocabulary noun, an article class, or a variable with a signature
+  -- the head: an article class, a vocabulary noun, or a variable with a signature
+  -- (the article's own classes take precedence over the vocabulary's nouns)
   let head : M (Ty × List Tm × Option (List MTok) × List Chunk) := do
-    match V.nouns.findSome? (fun n =>
-        ((matchPhrase n.sing r0) <|> (matchPhrase n.plural r0)).map fun (v, r) => (n, v, r)) with
-    | some (n, v, r) => pure (n.ty, [n.pred], v, r)
+    match matchWords st.nouns r0 with
+    | some (i, r) => do
+      let gty : Option Ty := (st.globs[i]?).map (·.ty)
+      let a ← match gty with
+        | some (.fn a .prop) => pure a
+        | _ => fail E.type
+      match r with
+      | .m ts :: r' =>
+        if (Math.parseSig ts).isSome then fail E.unsupported else pure (a, [.glob i], some ts, r')
+      | _ => pure (a, [.glob i], none, r)
     | none =>
-      match matchWords st.nouns r0 with
-      | some (i, r) => do
-        let gty : Option Ty := (st.globs[i]?).map (·.ty)
-        let a ← match gty with
-          | some (.fn a .prop) => pure a
-          | _ => fail E.type
-        match r with
-        | .m ts :: r' =>
-          if (Math.parseSig ts).isSome then fail E.unsupported else pure (a, [.glob i], some ts, r')
-        | _ => pure (a, [.glob i], none, r)
+      match V.nouns.findSome? (fun n =>
+          ((matchPhrase n.sing r0) <|> (matchPhrase n.plural r0)).map fun (v, r) => (n, v, r)) with
+      | some (n, v, r) =>
+        match v, r with
+        -- `a copula $C$`: the variable follows a noun without a slot
+        | none, .m ts :: r' =>
+          if (Math.parseSig ts).isSome || !(n.sing.all fun p => p != .v) then pure (n.ty, [n.pred], v, r)
+          else pure (n.ty, [n.pred], some ts, r')
+        | _, _ => pure (n.ty, [n.pred], v, r)
       | none =>
         -- `$f:A\to B$`, optionally after the noun `map` or `function`
         let r1 := match r0 with
@@ -756,7 +765,8 @@ def weSay (subj : List Chunk) (phrase : List Codes) (o : List Chunk) (cond : MT)
 the noun phrase `NP`, and `N` (singular) names it. -/
 def defClass (sym : MT) (plural : List Codes) (np : List Chunk) : M (List Nat × List Nat) := do
   let key ← match sym with | .id k => pure k | _ => fail E.unsupported
-  let b ← nounPhrase np
+  -- without `that is, NP`, the class is a noun of the vocabulary
+  let b ← nounPhrase (if np.isEmpty then plural.map Chunk.w else np)
   if !b.name.isEmpty then fail E.unsupported b.name
   let p := b.pred.getD (.lam b.ty .tt .tt)
   let i ← addGlob ⟨key, .fn b.ty .prop, [none], false⟩ p
