@@ -324,6 +324,10 @@ inductive Clause where
   (`compact`, `convex`, `centrally symmetric`) or of a function on its domain
   (`continuous`, `concave`, `strictly increasing`). -/
   | adjectives (s : MT) (adjs : List (List Codes))
+  /-- `Both constants are sharp.`, `The bound is sharp.`: each inequality `a ≤ b` of
+  the preceding claim about every element of a domain cannot be improved: for every
+  `ε > 0`, some element has `b - a < ε`. -/
+  | sharp
   deriving Repr, Inhabited
 
 /-- A clause with the citations that justify it, and its own binders
@@ -427,6 +431,16 @@ def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
   | some r => do let (m, _, r') ← display r; some (.holds m, r')
   | none =>
   -- equality holds exactly on $S$ | when $φ$; it holds exactly on $S$
+  -- [both|the|this|these|all] constants|bounds|inequalities are sharp
+  match (do
+      let r0 := ((kw [w!"both"] cs <|> kw [w!"the"] cs <|> kw [w!"this"] cs <|> kw [w!"these"] cs <|>
+        kw [w!"all"] cs).getD cs)
+      let r1 ← [w!"constants", w!"constant", w!"bounds", w!"bound", w!"inequalities", w!"inequality",
+        w!"estimates", w!"estimate"].findSome? (fun w => kw [w] r0)
+      let r2 ← kw [w!"are", w!"sharp"] r1 <|> kw [w!"is", w!"sharp"] r1
+      some (Clause.sharp, r2)) with
+  | some res => some res
+  | none =>
   -- $X$ is ADJ, ADJ and ADJ
   match (do
       let (m, r) ← formula cs

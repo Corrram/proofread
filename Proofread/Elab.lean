@@ -38,6 +38,10 @@ Readings (`x`, `y` range over the domain of the noun or binder):
   no piece of a piecewise `g` applies, the integrand is `0`.
 * `every $(x,z)\in A^2$ satisfies $a\ge b$`, then `equality holds exactly on $S$`
   (`when φ`) — `∀ x z ∈ A, a = b ↔ (x,z) ∈ S` (`↔ φ`).
+* `Both constants are sharp.` — each inequality `a ≤ b` of the preceding claim about every
+  element of a domain cannot be improved: `∀ ε > 0, ∃ x, b - a < ε`.
+* `$S$ is compact, convex, centrally symmetric` (a set of the plane), `$f$ is
+  continuous, concave, strictly increasing` (on the domain of its definition).
 * `Let $x\in A$.` in a result — `x` ranges over `A` in the rest of the result; a
   later `If φ,` about `x` is a hypothesis.
 -/
@@ -149,6 +153,9 @@ structure St where
   /-- The binders and the formula of the latest inequality claimed for every point
   of a domain (for `equality holds exactly on …`). -/
   lastIneq : Option (List BindInfo × MT) := none
+  /-- The binders and the inequalities of the latest claim about every element of a
+  domain (for `both constants are sharp`). -/
+  lastBounds : Option (List BindInfo × List MT) := none
   deriving Inhabited, Lean.ToExpr
 
 abbrev M := ExceptT Err (StateM St)

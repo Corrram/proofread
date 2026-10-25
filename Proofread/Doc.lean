@@ -297,6 +297,21 @@ def clauseMaths : Clause → List MT
   | .adjectives s _ => [s]
   | _ => []
 
+/-- The two sides `(smaller, larger)` of a single inequality. -/
+def ineqSides : MT → Option (MT × MT)
+  | .chain a [(r, b)] =>
+    if r == .le || r == .lt then some (a, b)
+    else if r == .ge || r == .gt then some (b, a)
+    else none
+  | _ => none
+
+/-- The inequalities a claim about every element of a domain asserts: the formula, both
+sides of `φ, equivalently ψ`, or the parts of a list. -/
+def boundsOf : MT → List MT
+  | .equiv x y => [x, y].filter (ineqSides · |>.isSome)
+  | .conj xs => xs.filter (ineqSides · |>.isSome)
+  | m => if (ineqSides m).isSome then [m] else []
+
 /-- Does the clause speak about the latest inequality (`equality holds …`)? -/
 def usesIneq : Clause → Bool
   | .equalityOn _ | .equalityWhen _ => true
@@ -331,6 +346,12 @@ def inequality : MT → Option MT
       else none
     | none => none
   | _ => none
+
+/-- Record the binders and inequalities of a claim about every element of a domain. -/
+def recordBounds (bs : List BindInfo) (body : MT) : M Unit := do
+  let ms := boundsOf body
+  if !ms.isEmpty then modify fun st => { st with lastBounds := some (bs, ms) }
+  if (inequality body).isSome then modify fun st => { st with lastIneq := some (bs, body) }
 
 def F := 100000
 
@@ -946,7 +967,7 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
   | .every vs d body => do
     let bs ← binderInfos (.every vs d)
     let p ← prop (scopeOf bs ++ sc) none body
-    if (inequality body).isSome then modify fun st => { st with lastIneq := some (bs, body) }
+    recordBounds bs body
     pure (wrap bs p)
   | .scoped f vs d eq => do
     let bs ← match d with
@@ -1047,14 +1068,27 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
       -- `every $(x,z)\in[0,1]^2$ satisfies φ`
       let bs ← binderInfos (.every vs d)
       let p ← prop (scopeOf bs ++ sc) none body
-      if (inequality body).isSome then modify fun st => { st with lastIneq := some (bs, body) }
+      recordBounds bs body
       pure (wrap bs p)
     | none => do
       let b ← nounPhrase np
       if b.name.isEmpty then fail E.unsupported
       let p ← prop ((b.name, b.ty) :: sc) none body
-      if (inequality body).isSome then modify fun st => { st with lastIneq := some ([b], body) }
+      recordBounds [b] body
       pure (wrap [b] p)
+  | .sharp => do
+    let some (bs, ms) := (← get).lastBounds | fail E.referent
+    let k := bs.length
+    -- for every ε > 0 (`loc k` under the binders), some element has `larger - smaller < ε`
+    let sc' := scopeOf bs ++ (w!"", .real) :: sc
+    let parts ← ms.mapM fun m => do
+      let some (a, b) := ineqSides m | fail E.unsupported
+      let at_ ← asReal (← term F sc' none a)
+      let bt ← asReal (← term F sc' none b)
+      let body := Tm.lt (.sub bt at_) (.loc k)
+      let exs := bs.foldr (fun bi acc => Tm.ex bi.ty (Tm.mkAnd (holdsAt bi.pred (.loc 0)) acc)) body
+      pure (Tm.all .real (.imp (.lt (.num 0) (.loc 0)) exs))
+    pure (conjAll parts)
   | .equalityOn s => do
     let some (bs, ineq) := (← get).lastIneq | fail E.referent
     let some e := inequality ineq | fail E.referent

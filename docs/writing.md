@@ -116,6 +116,8 @@ citations.
 | image sets | `\{\rho(C):C\in\CC,\ \gamma(C)=0\}=[-r_0,r_0]` |
 | extrema at a fixed value | `For every $n\in[-1,1]$, the maximum $\Lambda(n)$ and the minimum $\Lambda^{-1}(n)$ of $\nu(C^\top)$ over all copulas $C$ with $\nu(C)=n$ are each attained by exactly one copula.` |
 | an inequality on a square | `Then every $(x,z)\in[0,1]^2$ satisfies \begin{equation}\varphi_w(x)+\psi_w(z)\ge d_{\kappa_w}(x,z).\end{equation}` |
+| sharpness | `Both constants are sharp.` (after a claim `a\le c` about every element of a domain: for every `ε > 0` some element has `c - a < ε`) |
+| shape | `Moreover, $\Om$ is compact, convex and centrally symmetric, and $\rhoup$ is continuous, concave and strictly increasing.` (a function on the domain its definition states) |
 | equality sets | `If $w>\frac12$, equality holds exactly on $S_w$, and if $w=\frac12$, it holds exactly on $S_{1/2}\cup([\frac12,1]\times\{\frac12\})$.`, `…, and equality holds exactly when $x=R_b(z)$.` (about the preceding inequality, for every point of its domain) |
 
 The readings are fixed and documented next to each construction in
