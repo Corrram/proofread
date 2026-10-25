@@ -46,14 +46,22 @@ def findings(report, prose=False):
         where = (s["line"], s["column"])
         if s["outcome"] == "failed":
             yield (*where, "warning", f"sentence not compiled ({s['message']}); it asserts nothing checked")
-        elif s["outcome"] == "prose" and prose and s["environment"] != "text":
-            yield (*where, "info", f"not read by the grammar ({s['environment']}); this sentence makes no checked claim")
+        elif s["outcome"] == "prose" and s["environment"] not in ("text", "proof"):
+            yield (*where, "warning", f"sentence of a {s['environment']} not read by the grammar; "
+                   "this part of the statement is not checked")
+        elif s["outcome"] == "prose" and prose and s["environment"] == "proof":
+            yield (*where, "info", "proof sentence not read by the grammar; it makes no checked claim")
     for c in report["claims"]:
         s = sentences[c["sentence"]]
         where = (s["line"], s["column"])
-        if c["status"] == "unverified":
-            yield (*where, "warning", f"{ROLE.get(c['role'], 'claim')} (claim {c['index']}) compiled but not verified: "
-                   f"add {report['justifications']}.proof{c['index']}")
+        if c["status"] == "refuted":
+            yield (*where, "error", f"{ROLE.get(c['role'], 'claim')} (claim {c['index']}) is false as stated: "
+                   f"refuted by {c['justification']}")
+        elif c["status"] == "unverified":
+            certified = report["justifications"] not in ("", "[anonymous]")
+            why = c.get("note") or (f"add {report['justifications']}.proof{c['index']}" if certified
+                                    else "the article is not certified yet (build the module with #proofread_certify)")
+            yield (*where, "warning", f"{ROLE.get(c['role'], 'claim')} (claim {c['index']}) compiled but not verified: {why}")
         elif c["status"] == "text" and prose:
             yield (*where, "info", f"claim {c['index']} derived from its citations")
 
@@ -61,7 +69,7 @@ def findings(report, prose=False):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("report", type=pathlib.Path, help="the article's .proofread.json")
-    ap.add_argument("--prose", action="store_true", help="also list uncompiled sentences in results and proofs")
+    ap.add_argument("--prose", action="store_true", help="also list proof sentences the grammar does not read")
     ap.add_argument("--verified", action="store_true",
                     help="fail if a compiled claim is not verified")
     ap.add_argument("--strict", action="store_true",
@@ -96,7 +104,7 @@ def main():
     count = lambda st: sum(c["status"] == st for c in claims)
     print(f"{shown.as_posix()}: {len(report['sentences'])} sentences, {len(claims)} claims "
           f"({count('text')} derived from citations, {count('companion')} by companion proofs, "
-          f"{count('unverified')} unverified), {len(report['definitions'])} definitions; "
+          f"{count('refuted')} refuted, {count('unverified')} unverified), {len(report['definitions'])} definitions; "
           f"{errors} errors, {warnings} warnings", file=sys.stderr)
     unverified = count('unverified')
     return 1 if errors or (args.strict and warnings) or (args.verified and unverified) else 0

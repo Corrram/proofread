@@ -22,18 +22,19 @@
     if (r) CSS.highlights.set(name, new Highlight(r));
   }
 
-  const premise = p => `<li><button type="button" class="lm-jump" data-sentence="${p.sentence}"><span class="lm-dot lm-${p.status}" aria-hidden="true"></span>Claim ${p.claim + 1} · sentence ${p.sentence + 1}</button></li>`;
+  const premise = p => `<li><button type="button" class="lm-jump" data-sentence="${p.sentence}"><span class="lm-dot lm-${p.status}" aria-hidden="true"></span>Claim ${p.claim} · sentence ${p.sentence + 1}</button></li>`;
   const declaration = (name, url) => url ? `<a href="${esc(url)}"><code>${esc(name)}</code></a>` : `<code>${esc(name)}</code>`;
 
   function claimHTML(c) {
-    return `<section class="lm-claim"><h3>Claim ${c.index + 1} <span class="lm-role">${esc(c.role)}</span></h3>
+    return `<section class="lm-claim"><h3>Claim ${c.index} <span class="lm-role">${esc(c.role)}</span></h3>
       <p class="lm-status lm-${c.status}">${esc(c.statusText)}</p>
+      ${c.note ? `<p class="lm-small">Not verified: ${esc(c.note)}.</p>` : ''}
       <div class="lm-reading">${c.reading}</div>
       ${c.premises.length ? `<details open><summary>Uses ${c.premises.length} premise${c.premises.length > 1 ? 's' : ''}${c.cites.length ? ' (cites ' + c.cites.map(esc).join(', ') + ')' : ''}</summary><ul class="lm-premises">${c.premises.map(premise).join('')}</ul></details>`
         : `<p class="lm-small">${c.status === 'companion' ? 'Stated without a compiled proof in the text; proved in Lean from the companion development.' : 'No premises.'}</p>`}
       <details><summary>Lean statement</summary><pre><code>${esc(c.lean)}</code></pre></details>
       <details><summary>Definedness condition</summary><pre><code>${esc(c.meaningful)}</code></pre></details>
-      ${c.justification ? `<p class="lm-small">Justification: ${declaration(c.justification, c.justificationURL)}</p>` : ''}</section>`;
+      ${c.justification ? `<p class="lm-small">${c.status === 'refuted' ? 'Refutation' : 'Justification'}: ${declaration(c.justification, c.justificationURL)}</p>` : ''}</section>`;
   }
   function definitionHTML(d) {
     return `<section class="lm-claim"><h3>Definition of <span class="lm-symbol">${d.symbol}</span></h3>

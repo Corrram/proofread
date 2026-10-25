@@ -9,7 +9,8 @@ import {parseArticle, renderArticle} from './article.mjs';
 
 export const escape = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const standardAxioms = new Set(['propext', 'Classical.choice', 'Quot.sound']);
-const claimStatuses = new Set(['text', 'companion', 'unverified']);
+const claimStatuses = new Set(['text', 'companion', 'unverified', 'refuted']);
+const isVerified = status => status === 'text' || status === 'companion';
 
 export const statusText = {
   text: 'Derived from its citations',
@@ -17,6 +18,7 @@ export const statusText = {
   definition: 'Definition, well defined',
   binder: 'Binds a variable',
   unverified: 'Compiled, not yet verified',
+  refuted: 'False as stated: refuted in Lean',
   failed: 'Not compiled',
   prose: 'Prose, not compiled',
 };
@@ -44,11 +46,11 @@ export function validateReport(report, source) {
   report.claims.forEach((c, k) => {
     if (c.index !== k || !claimStatuses.has(c.status) || !report.sentences[c.sentence]) throw new Error(`Invalid claim ${k}`);
     if (c.premises.some(j => !report.claims[j])) throw new Error(`Claim ${k} has an unknown premise`);
-    if (c.status !== 'unverified' && c.premises.some(j => report.claims[j].status === 'unverified'))
+    if (isVerified(c.status) && c.premises.some(j => !isVerified(report.claims[j].status)))
       throw new Error(`Claim ${k} is verified from an unverified premise`);
   });
   const verified = new Set(report.verified);
-  report.claims.forEach(c => { if ((c.status !== 'unverified') !== verified.has(c.index)) throw new Error(`Claim ${c.index}: status disagrees with the certificate`); });
+  report.claims.forEach(c => { if (isVerified(c.status) !== verified.has(c.index)) throw new Error(`Claim ${c.index}: status disagrees with the certificate`); });
   return report;
 }
 
@@ -57,6 +59,7 @@ export function sentenceStatus(report, s) {
   if (s.outcome === 'failed') return 'failed';
   if (s.outcome === 'prose') return 'prose';
   const statuses = (s.claims ?? []).map(k => report.claims[k].status);
+  if (statuses.includes('refuted')) return 'refuted';
   if (statuses.includes('unverified')) return 'unverified';
   if (statuses.includes('companion')) return 'companion';
   if (statuses.includes('text')) return 'text';
@@ -160,7 +163,7 @@ export function inspectorData(report, {declarationURL = () => null} = {}) {
       status, label: statusText[status], line: s.line, environment: s.environment, message: s.message ?? null,
       claims: (s.claims ?? []).map(k => {
         const c = report.claims[k];
-        return {index: k, role: c.role, status: c.status, statusText: statusText[c.status],
+        return {index: k, role: c.role, status: c.status, statusText: statusText[c.status], note: c.note ?? '',
           reading: renderReading(c.reading), lean: c.lean, meaningful: c.meaningful,
           justification: c.justification, justificationURL: declarationURL(c.justification, c.module),
           premises: c.premises.map(j => ({claim: j, sentence: sentenceOfClaim(j), status: report.claims[j].status})),
@@ -186,6 +189,7 @@ export function coverage(report) {
     failed: count(s => s.outcome === 'failed'),
     proseMath: count(s => s.outcome === 'prose' && s.environment !== 'text'),
     claims: report.claims.length, text: claims('text'), companion: claims('companion'), unverified: claims('unverified'),
+    refuted: claims('refuted'),
     definitions: report.definitions.length,
   };
 }
@@ -220,8 +224,8 @@ export function renderCompiledReader({title, source, bibliography, report, confi
   // results closed by a compiled proof: their first statement sentence
   const proved = [...new Map(report.claims.filter(cl => cl.role === 'statement' && cl.premises.length)
     .map(cl => [report.sentences[cl.sentence].env, cl.sentence])).values()]
-    .map(k => `<button type="button" class="lm-jump" data-sentence="${k}"><span class="lm-dot lm-text" aria-hidden="true"></span>${escape(report.sentences[k].environment)} · line ${report.sentences[k].line}</button>`);
-  const legend = ['text', 'companion', 'definition', 'binder', 'unverified', 'failed', 'prose'].map(st =>
+    .map(k => `<button type="button" class="lm-jump" data-sentence="${k}"><span class="lm-dot lm-${sentenceStatus(report, report.sentences[k])}" aria-hidden="true"></span>${escape(report.sentences[k].environment)} · line ${report.sentences[k].line}</button>`);
+  const legend = ['text', 'companion', 'definition', 'binder', 'unverified', 'refuted', 'failed', 'prose'].map(st =>
     `<label class="lm-filter"><input type="checkbox" data-filter="${st}" checked><span class="lm-dot lm-${st}" aria-hidden="true"></span>${escape(statusText[st])}</label>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)} · Proofread</title>
@@ -233,7 +237,7 @@ ${assets.icon ? `<link rel="icon" href="${escape(assets.icon)}" type="image/svg+
 <div class="lm-layout"><main id="lm-article" tabindex="-1">
 <section class="lm-summary" id="lm-summary"><p class="lm-kicker">Single source · compiled by the Lean kernel</p>
 <p>${intro}</p>
-<p>${n(c.sentences, 'sentence')}. ${c.compiled} compiled into ${n(c.claims, 'claim')} and ${n(c.definitions, 'definition')}. Of the claims, <strong>${c.text} ${c.text === 1 ? 'is' : 'are'} derived from the results they cite</strong>, ${c.companion} ${c.companion === 1 ? 'is' : 'are'} checked by the companion Lean development, and ${c.unverified} ${c.unverified === 1 ? 'is' : 'are'} unverified. ${n(c.failed, 'sentence')} failed to compile, and ${n(c.proseMath, 'sentence')} in results and proofs ${c.proseMath === 1 ? 'is' : 'are'} prose the grammar does not read yet.</p>
+<p>${n(c.sentences, 'sentence')}. ${c.compiled} compiled into ${n(c.claims, 'claim')} and ${n(c.definitions, 'definition')}. Of the claims, <strong>${c.text} ${c.text === 1 ? 'is' : 'are'} derived from the results they cite</strong>, ${c.companion} ${c.companion === 1 ? 'is' : 'are'} checked by the companion Lean development, ${c.refuted ? `<strong>${c.refuted} ${c.refuted === 1 ? 'is' : 'are'} false as stated</strong>, ` : ''}and ${c.unverified} ${c.unverified === 1 ? 'is' : 'are'} unverified. ${n(c.failed, 'sentence')} failed to compile, and ${n(c.proseMath, 'sentence')} in results and proofs ${c.proseMath === 1 ? 'is' : 'are'} prose the grammar does not read yet.</p>
 ${proved.length ? `<p class="lm-proved">Results whose proof is compiled sentence by sentence: ${proved.join(' · ')}</p>` : ''}
 <fieldset class="lm-legend"><legend>Show markers</legend>${legend}</fieldset></section>
 ${body}</main>

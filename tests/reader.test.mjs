@@ -87,3 +87,21 @@ test('stale or inconsistent reports are rejected', () => {
   u.verified = [0];
   assert.throws(() => validateReport(u, source), /unverified premise/);
 });
+
+test('a refuted claim is marked false, and claims resting on it are not verified', () => {
+  const r = report();
+  r.claims[1].status = 'refuted';
+  r.claims[1].justification = 'J.refute1';
+  r.claims[0].status = 'unverified';
+  r.claims[0].note = 'it rests on claim 1, which is refuted';
+  r.verified = [];
+  validateReport(r, source);
+  assert.equal(sentenceStatus(r, r.sentences[2]), 'refuted');
+  assert.equal(sentenceStatus(r, r.sentences[1]), 'unverified');
+  const data = inspectorData(r);
+  assert.equal(data[1].claims[0].note, 'it rests on claim 1, which is refuted');
+  // a refuted claim never counts as verified
+  const v = report();
+  v.claims[1].status = 'refuted';
+  assert.throws(() => validateReport(v, source), /unverified premise|disagrees/);
+});

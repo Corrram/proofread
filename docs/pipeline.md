@@ -83,13 +83,23 @@ typically a companion development, connected by proved bridge theorems. The
 certificate permits only the axioms `propext`, `Classical.choice` and
 `Quot.sound`.
 
+Not every claim needs a justification. A claim without one, or whose proof
+still uses `sorry`, is *unverified*, and so is every claim that rests on an
+unverified one: the certificate covers the others. A claim that is false as
+stated is *refuted* by `J.refuteK : Foo.meaningfulK ∧ ¬ Foo.claimK` (it is
+meaningful, and it does not hold). `#proofread_certify` then declares
+`Foo.refutedK`, and the reports, the reader and the PDF mark the claim false.
+A proof of a refuted claim can only rest on false premises, so it does not
+count.
+
 ## Reports
 
 `#proofread_certify` writes, next to the article:
 
 * `article.proofread.json`: every sentence (position, environment, outcome),
-  definition and claim (formal reading, Lean statement, premises, status,
-  justification). Read by the web reader and by
+  definition and claim (formal reading, Lean statement, premises, status
+  `text`, `companion`, `unverified` or `refuted`, justification, and why an
+  unverified claim is not verified). Read by the web reader and by
   `scripts/proofread_diagnostics.py`.
 * `article.proofread.tex`: the status of every labelled result, read by
   `\usepackage[status]{proofread}` to mark results in the margin of the PDF.
@@ -104,6 +114,7 @@ with the status of every sentence:
 * checked by a companion development;
 * definition, well defined;
 * compiled, not yet verified;
+* false as stated, refuted in Lean;
 * not compiled;
 * prose.
 

@@ -3,10 +3,14 @@ import Proofread.Readable
 /-! # Certifying an article
 
 `#proofread_certify Foo "article.tex" using J` collects the justifications in
-namespace `J`: `J.definedI : Foo.wellDefinedI` for every definition and
-`J.proofK : Foo.obligationK` for the claims to verify. It then
+namespace `J`: `J.definedI : Foo.wellDefinedI` for every definition,
+`J.proofK : Foo.obligationK` for the claims to verify and
+`J.refuteK : Foo.meaningfulK ∧ ¬ Foo.claimK` for claims shown false. It then
 
-* checks that every premise of a verified claim is verified and ranks them;
+* drops the proofs that use `sorry` (their claims stay unverified, so that an
+  article can be certified while its proofs are being written), and the
+  proofs of claims that cite a claim which is not verified;
+* ranks the verified claims by their premises;
 * audits each claim that the text derives (a proof sentence, or a statement
   closed by a compiled proof): its justification may use only Lean's and
   Mathlib's libraries, Proofread, the compiled article and helpers that are
@@ -61,6 +65,8 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
   let env ← getEnv
   let nm (s : String) : Name := Name.mkSimple s
   -- justifications
+  let usesSorry (n : Name) : CommandElabM Bool := do
+    pure ((← liftCoreM <| Lean.collectAxioms n).contains ``sorryAx)
   let mut defined : Array Name := #[]
   for i in [0:d.values.length] do
     let n := jn ++ nm s!"defined{i}"
@@ -68,23 +74,57 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
     | some ci =>
       unless ci.type == Lean.mkConst (ns ++ nm s!"wellDefined{i}") do
         throwError "{n} must have type {ns ++ nm s!"wellDefined{i}"}"
+      if ← usesSorry n then
+        throwError "definition {i} ({defName d i}): its well-definedness proof {n} uses sorry"
       defined := defined.push n
     | none => throwError "definition {i} ({defName d i}) has no well-definedness proof {n}"
   let mut justified : Array (Option Name) := #[]
+  let mut notes : Array String := Array.replicate d.claims.length ""
   for k in [0:d.claims.length] do
     let n := jn ++ nm s!"proof{k}"
     match env.find? n with
     | some ci =>
       unless ci.type == Lean.mkConst (ns ++ nm s!"obligation{k}") do
         throwError "{n} must have type {ns ++ nm s!"obligation{k}"}"
-      justified := justified.push (some n)
+      if ← usesSorry n then
+        notes := notes.set! k s!"its proof {n} uses sorry"
+        justified := justified.push none
+      else justified := justified.push (some n)
     | none => justified := justified.push none
-  -- verified claims are closed under premises; ranks
+  -- refutations: the claim is meaningful and false
+  let mut refuted : Array (Option Name) := #[]
   for k in [0:d.claims.length] do
-    if justified[k]!.isNone then continue
-    for j in d.claims[k]!.premises do
-      if justified[j]!.isNone then
-        throwError "claim {k} cites claim {j}, which has no justification"
+    let n := jn ++ nm s!"refute{k}"
+    match env.find? n with
+    | some ci =>
+      let expected := mkAnd (Lean.mkConst (ns ++ nm s!"meaningful{k}")) (mkNot (Lean.mkConst (ns ++ nm s!"claim{k}")))
+      unless ← liftTermElabM (Meta.isDefEq ci.type expected) do
+        throwError "{n} must have type {ns ++ nm s!"meaningful{k}"} ∧ ¬ {ns ++ nm s!"claim{k}"}"
+      if ← usesSorry n then
+        notes := notes.set! k s!"its refutation {n} uses sorry"
+        refuted := refuted.push none
+      else
+        let thm := ns ++ nm s!"refuted{k}"
+        liftCoreM <| addDecl <| Declaration.thmDecl
+          { name := thm, levelParams := [], type := expected, value := Lean.mkConst n }
+        refuted := refuted.push (some thm)
+        -- a proof of a refuted claim can only rest on false premises: it does not count
+        justified := justified.set! k none
+    | none => refuted := refuted.push none
+  -- verified claims are closed under premises: a proof of a claim that cites an
+  -- unverified one does not count
+  let mut dropped := true
+  while dropped do
+    dropped := false
+    for k in [0:d.claims.length] do
+      if justified[k]!.isNone then continue
+      if let some j := d.claims[k]!.premises.find? (justified[·]!.isNone) then
+        justified := justified.set! k none
+        notes := notes.set! k s!"it rests on claim {j}, which is {if refuted[j]!.isSome then "refuted" else "not verified"}"
+        dropped := true
+  for k in [0:d.claims.length] do
+    if !notes[k]!.isEmpty then logInfo m!"claim {k} is not verified: {notes[k]!}"
+    if refuted[k]!.isSome then logInfo m!"claim {k} is false: {refuted[k]!.get!}"
   -- ranks: the longest chain of premises below a claim (the premise graph must be acyclic)
   let mut rank : Array Nat := Array.replicate d.claims.length 0
   let mut changed := true
@@ -179,17 +219,24 @@ syntax (name := proofreadCertify) "#proofread_certify " ident str " using " iden
   let standard := [``propext, ``Classical.choice, ``Quot.sound]
   let extra := axs.toList.filter (!standard.contains ·)
   unless extra.isEmpty do throwError "the certificate depends on nonstandard axioms {extra}"
+  for r in refuted.toList.filterMap id do
+    let extra := (← liftCoreM <| Lean.collectAxioms r).toList.filter (!standard.contains ·)
+    unless extra.isEmpty do throwError "the refutation {r} depends on nonstandard axioms {extra}"
   -- report
   let status (k : Nat) : String :=
-    if justified[k]!.isNone then "unverified" else if fromText k then "text" else "companion"
+    if refuted[k]!.isSome then "refuted"
+    else if justified[k]!.isNone then "unverified" else if fromText k then "text" else "companion"
+  let refutation (k : Nat) : Option Name := refuted[k]!.map fun _ => jn ++ nm s!"refute{k}"
   let infos : Array ClaimInfo := (List.range d.claims.length).toArray.map fun k =>
-    { status := status k, rank := rank[k]!, justification := (justified[k]!.map toString).getD "",
-      module := ((justified[k]!.bind (moduleOf env)).map toString).getD "" }
+    { status := status k, rank := rank[k]!,
+      justification := ((justified[k]!.orElse fun _ => refutation k).map toString).getD "",
+      module := (((justified[k]!.orElse fun _ => refutation k).bind (moduleOf env)).map toString).getD "",
+      note := notes[k]! }
   let defInfos := defined.map fun n => (toString n, ((moduleOf env n).map toString).getD "")
   writeReport ns jn rel d infos defInfos verified axs.toList
   let count (st : String) := ((List.range d.claims.length).filter (status · == st)).length
   logInfo m!"{d.claims.length} claims: {count "text"} derived in the text from their citations, \
-    {count "companion"} justified by companion proofs, {count "unverified"} unverified; \
-    {d.values.length} definitions well defined. Axioms: {axs.toList}"
+    {count "companion"} justified by companion proofs, {count "refuted"} refuted, \
+    {count "unverified"} unverified; {d.values.length} definitions well defined. Axioms: {axs.toList}"
 
 end Proofread

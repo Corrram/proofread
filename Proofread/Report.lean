@@ -52,12 +52,14 @@ structure ClaimInfo where
   rank : Nat := 0
   justification : String := ""
   module : String := ""
+  /-- Why a claim is not verified (a proof with `sorry`, an unverified citation). -/
+  note : String := ""
 
 /-- The status of each labelled result, for the margin marks of `proofread.sty`:
 `text` (every sentence of the statement compiled and every claim derived in the
 text from its citations), `verified` (every sentence compiled, every claim
-verified), `partial` (some sentences compiled and verified), `compiled` (compiled
-claims not yet verified) or `none`. -/
+verified), `refuted` (a claim of the result is false), `partial` (some sentences
+compiled and verified), `compiled` (compiled claims not yet verified) or `none`. -/
 def resultStatus (d : Doc) (claims : Array ClaimInfo) (env : Nat) : String := Id.run do
   let sents := (List.range d.sentences.length).filter fun s => (d.sentences[s]!).1.env == env
   let outs := sents.map fun s => d.outcomes[s]?.getD .prose
@@ -65,8 +67,10 @@ def resultStatus (d : Doc) (claims : Array ClaimInfo) (env : Nat) : String := Id
   let allCompiled := !outs.isEmpty && outs.all fun o => match o with | .compiled _ _ => true | _ => false
   let st (k : Nat) := (claims.getD k {}).status
   if ks.isEmpty then return "none"
-  let allVerified := ks.all fun k => st k != "unverified"
-  let someVerified := ks.any fun k => st k != "unverified"
+  if ks.any (st · == "refuted") then return "refuted"
+  let ok (k : Nat) : Bool := st k == "text" || st k == "companion"
+  let allVerified := ks.all ok
+  let someVerified := ks.any ok
   if allCompiled && allVerified then
     return (if ks.all (fun k => st k == "text") then "text" else "verified")
   if someVerified then return "partial"
@@ -117,7 +121,8 @@ def writeReport (ns jn : Name) (rel : String) (d : Doc) (claims : Array ClaimInf
       ("reading", toJson (c.body.tex cTex gTex [])),
       ("lean", toJson (← ppConst (ns ++ nm s!"claim{k}"))),
       ("meaningful", toJson (← ppConst (ns ++ nm s!"meaningful{k}"))),
-      ("justification", toJson info.justification), ("module", toJson info.module)]
+      ("justification", toJson info.justification), ("module", toJson info.module),
+      ("note", toJson info.note)]
   let mut defsJ : Array Json := #[]
   for i in [0:d.values.length] do
     let g := d.globs[i]!
