@@ -290,7 +290,32 @@ def clauseMaths : Clause → List MT
   | .extremaOver items f _ _ cond => items.map (·.2) ++ [f, cond]
   | .increases f a b => [f, a, b]
   | .sends m f g => [m, f, g]
+  | .every _ d b => [d, b]
+  | .equalityOn s => [s]
+  | .equalityWhen φ => [φ]
+  | .ifThen c cl => c :: clauseMaths cl
+  | .adjectives s _ => [s]
   | _ => []
+
+/-- Does the clause speak about the latest inequality (`equality holds …`)? -/
+def usesIneq : Clause → Bool
+  | .equalityOn _ | .equalityWhen _ => true
+  | .ifThen _ cl => usesIneq cl
+  | _ => false
+
+/-- The free variables of the latest inequality that a clause refers to. -/
+def ineqFree (st : St) (cl : Clause) : List Codes :=
+  if usesIneq cl then
+    match st.lastIneq with
+    | some (bs, m) => freeIds 64 (bs.map (·.name)) m
+    | none => []
+  else []
+
+/-- A piecewise formula that no piece covers is `0` there (for integrands). -/
+def zeroElsewhere : Tm → Tm
+  | .cases c v rest => .cases c v (zeroElsewhere rest)
+  | .undef .real => .num 0
+  | t => t
 
 /-- The single inequality of a chain, for `with equality only at`. -/
 def inequality : MT → Option MT
@@ -657,14 +682,12 @@ def denotedBy (name : List Chunk) (sym : MT) : M (List Nat × List Nat) := do
     pure ([i], [])
   | none => fail E.noun (wordsOf name).flatten
 
-/-- `For B, set $X_p\coloneqq e [\in D]$`: a family on the binder's domain, and the
-claims of the rest of the chain. -/
-def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := do
+/-- `For B, set $X_p\coloneqq e [\in D]$` or `$f(p)\coloneqq e$`. -/
+def setDefSimple (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := do
   match m with
   | .chain lhs ((.defeq, rhs) :: more) => do
     let (key, family) ← match lhs with
       | .sub (.id k) (.id p) => if p == b.name then pure (k, true) else fail E.unsupported
-      | .id k => pure (k, false)
       -- `f(x)\coloneqq e`: a function of the binder's variable
       | .app (.id k) [.id p] => if p == b.name then pure (k, false) else fail E.unsupported
       | _ => fail E.unsupported
@@ -679,6 +702,59 @@ def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := d
     pure ([i], ids)
   | _ => fail E.unsupported
 
+/-- `For B, set $X_p\coloneqq e [\in D]$`: a family on the binder's domain, and the
+claims of the rest of the chain. -/
+def setDef (c : SentCtx) (b : BindInfo) (m : MT) : M (List Nat × List Nat) := do
+  match m with
+  -- `f_p(x,…)\coloneqq e`, `R_p^-(z)\coloneqq e`: a family with further real
+  -- arguments; `z_-(x)\coloneqq e`, `c\coloneqq e`: a symbol that does not show `p`,
+  -- whose implicit parameter `p` is supplied from the scope at each use
+  | .chain lhs ((.defeq, rhs) :: more) =>
+    let (hd, args) := match lhs with
+      | .app h as => (h, as)
+      | _ => (lhs, [])
+    let names := args.filterMap fun a => match a with | .id n => some n | _ => none
+    let simple := match lhs with
+      | .sub (.id _) (.id p) => p == b.name
+      | .app (.id _) [.id p] => p == b.name
+      | _ => false
+    if simple || names.length != args.length || names.contains b.name then setDefSimple c b m else do
+    let (key, family) ← match hd with
+      | .sub (.id k) (.id p) =>
+        if p == b.name then pure (k, true) else
+        match Elab.symKey hd with | some k' => pure (k', false) | none => fail E.unsupported
+      | .sup (.sub (.id k) (.id p)) (.id s) => if p == b.name then pure (k ++ w!"^" ++ s, true) else fail E.unsupported
+      | .id k => pure (k, false)
+      | _ => match Elab.symKey hd with | some k' => pure (k', false) | none => fail E.unsupported
+    if !more.isEmpty && !args.isEmpty then fail E.unsupported
+    let ats := names.map fun _ => Ty.real
+    let sc : Scope := (names.zip ats).reverse ++ [(b.name, b.ty)]
+    let (v, vty) ← term F sc none rhs
+    let value := Tm.lam b.ty (holdsAt b.pred (.loc 0)) (lamWrap ats v)
+    let i ← addGlob ⟨key, .fn b.ty (tyWrap ats vty), b.pred :: ats.map (fun _ => none), family⟩ value
+    if !family then modify fun st => { st with implicits := st.implicits ++ [(i, b.name)] }
+    let x : Tm × Ty := (.guard (holdsAt b.pred (.loc 0)) (.app (.glob i) (.loc 0)), vty)
+    let sc1 : Scope := [(b.name, b.ty)]
+    let ps ← more.mapM fun (r, y) => do
+      if r == .mem then Elab.term.member F sc1 x y
+      else do relTm r x (← term F sc1 none y)
+    let ids ← ps.mapM fun p => emit c (wrap [b] p) []
+    pure ([i], ids)
+  | _ => fail E.unsupported
+
+/-- The fixed variable (`fix $b\in B$` earlier in the section) that the subscript of a
+definition's symbol names, as in `Set $R_b^-(z)\coloneqq …$`. -/
+def fixedFor (c : SentCtx) (m : MT) : M (Option BindInfo) := do
+  let lhs := match m with | .chain l _ => l | _ => m
+  let hd := match lhs with | .app h _ => h | h => h
+  let v := match hd with
+    | .sub (.id _) (.id p) => some p
+    | .sup (.sub (.id _) (.id p)) _ => some p
+    | _ => none
+  match v with
+  | some p => pure (((← get).fixed.find? fun (s, b) => s == c.ctx.sec && b.name == p).map (·.2))
+  | none => pure none
+
 /-- `Set $d_0\coloneqq e$.`: constants, with the claims of the rest of each chain;
 under a binder, families and functions of the binder's variable (`setDef`). -/
 def constDefs (c : SentCtx) (b : Option BindInfo) (defs : List MT) (labels : List Codes) :
@@ -692,6 +768,12 @@ def constDefs (c : SentCtx) (b : Option BindInfo) (defs : List MT) (labels : Lis
       ds := ds ++ d'
       cs := cs ++ c'
     | none =>
+      match ← fixedFor c m with
+      | some fb => do
+        let (d', c') ← setDef c fb m
+        ds := ds ++ d'
+        cs := cs ++ c'
+      | none =>
       match m with
       | .chain lhs ((.defeq, rhs) :: more) => do
         let some key := symKey lhs | fail E.unsupported
@@ -707,6 +789,53 @@ def constDefs (c : SentCtx) (b : Option BindInfo) (defs : List MT) (labels : Lis
       | _ => fail E.unsupported
   addLabels labels cs true
   pure (ds, cs)
+
+/-- `define continuous functions $f,g:A\to\R$ by $f(a)=c$, …, and DISPLAY` with
+`f'(x) = …` in the display: `f(x) = c + ∫_a^x f'(t)\,dt` for `x ∈ A` (defined when the
+derivative is integrable between `a` and `x`). Where no piece of a piecewise
+derivative applies (at finitely many points), the integrand is `0`, which does not
+change the integral. Under a binder `p`, `f_p` is a family. -/
+def defDeriv (bi : Option BindInfo) (names : List MT) (dom cod : MT) (anchors : List MT)
+    (derivs : MT) (labels : List Codes) : M (List Nat × List Nat) := do
+  let (aty, apred) ← domainOf true dom
+  let (cty, _) ← domainOf true cod
+  if aty != .real || cty != .real then fail E.unsupported
+  let rows := match derivs with | .conj xs => xs | m => [m]
+  let sc0 : Scope := match bi with | some b => [(b.name, b.ty)] | none => []
+  let mut ids : List Nat := []
+  for n in names do
+    let some nk := Elab.symKey n | fail E.unsupported
+    let (key, family) ← match n, bi with
+      | .sub (.id k) (.id p), some b => if p == b.name then pure (k, true) else fail E.unsupported
+      | .id k, none => pure (k, false)
+      | _, _ => fail E.unsupported
+    -- the value at one point
+    let some (a, cv) := anchors.findSome? (fun an => match an with
+        | .chain (.app h [a]) [(.eq, cv)] => if Elab.symKey h == some nk then some (a, cv) else none
+        | _ => none)
+      | fail E.referent nk
+    -- the derivative
+    let some (x, g) := rows.findSome? (fun r => match r with
+        | .chain (.app (.sup h (.id d)) [.id x]) [(.eq, g)] =>
+          if d == [39] && Elab.symKey h == some nk then some (x, g) else none
+        | _ => none)
+      | fail E.referent nk
+    let at_ ← asReal (← term F sc0 none a)
+    let ct ← asReal (← term F sc0 none cv)
+    let gt ← asReal (← term F ((x, .real) :: (w!"", .real) :: sc0) none g)
+    let gl := Tm.lam .real .tt (zeroElsewhere gt)
+    let a1 := shift 1 0 at_
+    let integral := Tm.app (.app (.app (.prim .intervalIntegral) a1) (.loc 0)) gl
+    let integrable := Tm.app (.app (.app (.prim .intervalIntegrable) gl) a1) (.loc 0)
+    let body := Tm.add (shift 1 0 ct) (.guard integrable integral)
+    let fx := Tm.lam .real (holdsAt apred (.loc 0)) body
+    let (g, v) : Glob × Tm := match bi with
+      | some b => (⟨key, .fn b.ty (.fn .real .real), [b.pred, apred], family⟩, Tm.lam b.ty (holdsAt b.pred (.loc 0)) fx)
+      | none => (⟨key, .fn .real .real, [apred], family⟩, fx)
+    let i ← addGlob g v
+    ids := ids ++ [i]
+  addLabels labels [] true
+  pure (ids.eraseDups, [])
 
 /-- `For B, let $X_p$ denote NP`. -/
 def letDenote (b : BindInfo) (sym : MT) (np : List Chunk) : M (List Nat × List Nat) := do
@@ -817,6 +946,7 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
   | .every vs d body => do
     let bs ← binderInfos (.every vs d)
     let p ← prop (scopeOf bs ++ sc) none body
+    if (inequality body).isSome then modify fun st => { st with lastIneq := some (bs, body) }
     pure (wrap bs p)
   | .scoped f vs d eq => do
     let bs ← match d with
@@ -824,6 +954,7 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
       | none => pure []
     let sc' := scopeOf bs ++ sc
     let p ← prop sc' none f
+    if !bs.isEmpty && (inequality f).isSome then modify fun st => { st with lastIneq := some (bs, f) }
     let p ← match eq with
       | some at_ => do
         let ineq ← liftO (inequality f) E.unsupported
@@ -908,10 +1039,68 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
     let uniq := Tm.all sty (.imp (.app (.glob ni) (.loc 0)) (.imp (conjAll ay) (.eq (.loc 0) (shift 1 0 st))))
     pure (conjAll ([Tm.app (.glob ni) st] ++ atS ++ [uniq]))
   | .everyNP np body => do
-    let b ← nounPhrase np
-    if b.name.isEmpty then fail E.unsupported
-    let p ← prop ((b.name, b.ty) :: sc) none body
-    pure (wrap [b] p)
+    let mb := match np with
+      | [.m ts] => Grammar.binderMath ts
+      | _ => none
+    match mb with
+    | some (vs, d) => do
+      -- `every $(x,z)\in[0,1]^2$ satisfies φ`
+      let bs ← binderInfos (.every vs d)
+      let p ← prop (scopeOf bs ++ sc) none body
+      if (inequality body).isSome then modify fun st => { st with lastIneq := some (bs, body) }
+      pure (wrap bs p)
+    | none => do
+      let b ← nounPhrase np
+      if b.name.isEmpty then fail E.unsupported
+      let p ← prop ((b.name, b.ty) :: sc) none body
+      if (inequality body).isSome then modify fun st => { st with lastIneq := some ([b], body) }
+      pure (wrap [b] p)
+  | .equalityOn s => do
+    let some (bs, ineq) := (← get).lastIneq | fail E.referent
+    let some e := inequality ineq | fail E.referent
+    let sc' := scopeOf bs ++ sc
+    let ep ← prop sc' none e
+    let (st, sty) ← term F sc' none s
+    let k := bs.length
+    let rec memb : Tm → Ty → List (Tm × Ty) → M Tm
+      | t, .prop, [] => pure t
+      | t, .fn a r, (x, xt) :: xs => do memb (.app t (← coerce x xt a)) r xs
+      | _, _, _ => fail E.type
+    let mem ← memb st sty ((List.range k).reverse.zip (bs.map (·.ty)) |>.map fun (j, t) => (Tm.loc j, t))
+    pure (wrap bs (.iff ep mem))
+  | .equalityWhen φ => do
+    let some (bs, ineq) := (← get).lastIneq | fail E.referent
+    let some e := inequality ineq | fail E.referent
+    let sc' := scopeOf bs ++ sc
+    let ep ← prop sc' none e
+    let q ← prop sc' none φ
+    pure (wrap bs (.iff ep q))
+  | .ifThen cond cl => do
+    let h ← prop sc none cond
+    let p ← clauseTm c sc onVar lastRhs cl
+    pure (.imp h p)
+  | .adjectives s adjs => do
+    let (t, ty) ← term F sc none s
+    -- a function's domain is the one its definition states
+    let dom : Tm ← match Elab.symKey s with
+      | some k => do
+        match ← lookupGlob k with
+        | some (_, g) => pure (((g.doms.head?).join).getD (.lam .real .tt .tt))
+        | none => pure (.lam .real .tt .tt)
+      | none => pure (.lam .real .tt .tt)
+    let ps ← adjs.mapM fun a => do
+      if ty == .fn .real (.fn .real .prop) then
+        if a == [w!"compact"] then pure (Tm.app (.prim .compact2) t)
+        else if a == [w!"convex"] then pure (Tm.app (.prim .convex2) t)
+        else if a == [w!"centrally", w!"symmetric"] then pure (Tm.app (.prim .symm2) t)
+        else fail E.type
+      else if ty == .fn .real .real then
+        if a == [w!"continuous"] then pure (Tm.app (.app (.prim .continuousOn) t) dom)
+        else if a == [w!"concave"] then pure (Tm.app (.app (.prim .concaveOn) t) dom)
+        else if a == [w!"strictly", w!"increasing"] then pure (Tm.app (.app (.prim .strictMonoOn) t) dom)
+        else fail E.type
+      else fail E.type
+    pure (conjAll ps)
   | .extremumOf isMax value f s at_ rels => do
     let fm ← match f with
       | some fm => pure fm
@@ -975,6 +1164,26 @@ def citesOf (cl : CClause) : List Codes := cl.cites
 /-- The claims of one sentence. `exactly one` takes the following clauses into its scope. -/
 def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List CClause) : M (List Nat) := do
   modify fun st => { st with topic := if topic == .none then st.topic else topic }
+  -- `If $φ$, …` about variables that are already bound (by the result or a fixed
+  -- variable) is a hypothesis: of the first clause when a later clause has its own,
+  -- otherwise of every clause
+  let st0 ← get
+  let known := st0.envBinders.map (·.name) ++ (st0.fixed.filter (·.1 == c.ctx.sec)).map (·.2.name)
+  let isHyp (b : Bind) : Bool := match b with
+    | .ifCond φ =>
+      let fr := ((freeIds 64 [] φ).filter fun n => !(st0.globs.any fun g => g.key == n && !g.family)).eraseDups
+      !fr.isEmpty && fr.all known.contains
+    | _ => false
+  let hyps := binds.filter isHyp
+  let binds := binds.filter (!isHyp ·)
+  let laterIf := (cls.drop 1).any fun cl => match cl.clause with | .ifThen .. => true | _ => false
+  let cls := hyps.foldr (fun h acc => match h with
+    | .ifCond φ =>
+      if laterIf then match acc with
+        | cl :: rest => { cl with clause := Clause.ifThen φ cl.clause } :: rest
+        | [] => []
+      else acc.map fun cl => { cl with clause := Clause.ifThen φ cl.clause }
+    | _ => acc) cls
   let bss ← binds.mapM binderInfos
   let bs := bss.flatten
   -- `On I,`: the sentence's single free variable ranges over I
@@ -996,8 +1205,10 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
   let inherited ← if inResult && !st.envBinders.isEmpty then do
       let known := (scopeOf (bs ++ onVar.toList)).map (·.1)
       let clBound := cls.flatMap fun cl => (cl.binds.flatMap fun b => match b with
-        | .every vs _ => vs | _ => []) ++ (match cl.clause with | .scoped _ vs _ _ => vs | _ => [])
-      let free := (cls.flatMap (fun cl => (clauseMaths cl.clause).flatMap (freeIds 64 (known ++ clBound)))).eraseDups
+        | .every vs _ => vs | _ => []) ++ (match cl.clause with
+          | .scoped _ vs _ _ | .every vs _ _ => vs | _ => [])
+      let free := (cls.flatMap (fun cl => (clauseMaths cl.clause).flatMap (freeIds 64 (known ++ clBound)) ++
+        ineqFree st cl.clause)).eraseDups
       let free := free.filter fun n => !(st.globs.any fun g => g.key == n && !g.family)
       pure (st.envBinders.filter fun b => free.contains b.name)
     else pure []
@@ -1044,8 +1255,9 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
         let cbs := (← cl.binds.mapM binderInfos).flatten
         -- a clause with its own binder is not in the scope of the sentence's opening
         -- binders; inherited binders bind the variables the clause uses
-        let own := match k with | .scoped _ vs _ _ => vs | _ => []
-        let free := (clauseMaths k).flatMap (freeIds 64 ((scopeOf (bs ++ cbs)).map (·.1) ++ own))
+        let own := match k with | .scoped _ vs _ _ | .every vs _ _ => vs | _ => []
+        let free := (clauseMaths k).flatMap (freeIds 64 ((scopeOf (bs ++ cbs)).map (·.1) ++ own)) ++
+          ineqFree (← get) k
         let inh := inherited.filter fun b => free.contains b.name
         let outer := if cbs.isEmpty then inh ++ bs ++ onVar.toList else inh
         let p ← clauseTm c (scopeOf cbs ++ scopeOf outer) onVar last k
@@ -1102,6 +1314,37 @@ def sentence (c : SentCtx) (s : Sent) : M (List Nat × List Nat) := do
   | .claims topic binds cls => do
     let ids ← claimSentence c topic binds cls
     pure ([], ids)
+  | .fix b defs labels => do
+    let [bi] ← binderInfos b | fail E.unsupported
+    modify fun st => { st with fixed := (c.ctx.sec, bi) :: st.fixed.filter (·.2.name != bi.name) }
+    if defs.isEmpty then pure ([], []) else constDefs c (some bi) defs labels
+  | .assume b => do
+    let bs ← binderInfos b
+    match c.ctx.kind with
+    | .text =>
+      modify fun st => { st with fixed := bs.map (c.ctx.sec, ·) ++ st.fixed.filter fun (_, x) => !(bs.any (·.name == x.name)) }
+    | _ =>
+      modify fun st => { st with envBinders := bs ++ st.envBinders.filter fun x => !(bs.any (·.name == x.name)) }
+    pure ([], [])
+  | .defDeriv b sets names dom cod anchors derivs labels => do
+    let bi ← match b with
+      | some bd => do
+        let [bi] ← binderInfos bd | fail E.unsupported
+        pure (some bi)
+      | none =>
+        -- the variable of the names' subscripts, fixed earlier in the section
+        match names.head? with
+        | some (.sub (.id _) (.id p)) => do
+          match (← get).fixed.find? (fun (s, x) => s == c.ctx.sec && x.name == p) with
+          | some (_, x) => pure (some x)
+          | none => fail E.free p
+        | _ => pure none
+    let (d1, c1) ← match bi, sets with
+      | _, [] => pure ([], [])
+      | some x, _ => constDefs c (some x) sets []
+      | none, _ => fail E.unsupported
+    let (d2, c2) ← defDeriv bi names dom cod anchors derivs labels
+    pure (d1 ++ d2, c1 ++ c2)
 
 end Compile
 

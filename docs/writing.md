@@ -54,6 +54,16 @@ rho and Gini's gamma* (arXiv:2609.19890), compiled in `lean-verifications`
     `\{\rho(C):C\in\CC,\ \gamma(C)=0\}`, not `\{\rho(C):\gamma(C)=0\}`.
 11. **No semicolons in prose.** A semicolon joins two claims without saying how
     they relate. Use a period, ", and", ", so" or ", whereas".
+12. **Fixed variables stay fixed.** "fix $b\in(0,\frac12)$" binds `b` for the
+    following sentences of the section, and "Let $w\in[\frac12,1)$." at the
+    start of a result binds `w` for the rest of the result. A symbol defined
+    under a binder whose name does not show the variable (`z_-(x)` under "For
+    $b\in(0,\frac12]$") depends on it implicitly: each use takes the `b` of its
+    context.
+13. **Overloading needs disjoint domains.** A family defined again on a further
+    parameter domain (`\kappa_w` for `w\in[\frac12,1)`, later `\kappa_b` for
+    `b\in(0,\frac12)`) is one family on the union. Its well-definedness asks
+    that the domains do not overlap, which is the paper's "no confusion can arise".
 
 ## Definitions
 
@@ -75,6 +85,11 @@ rho and Gini's gamma* (arXiv:2609.19890), compiled in `lean-verifications`
 | constants | `Set $r_0\coloneqq\frac{144+9\sqrt6}{500}\approx0.33209$.`, `Define \begin{equation}d_0\coloneqq…,\qquad\Delta_0\coloneqq….\end{equation}` |
 | a named set | `The exact region between Spearman's rho and Gini's gamma is \begin{equation}\Om\coloneqq\{(\rho(C),\gamma(C)):C\in\CC\}.\end{equation}` |
 | a maximum | `For $g\in[-1,1]$, set \begin{align}\rhoup(g)\coloneqq\max\{\rho(C):C\in\CC,\ \gamma(C)=g\}.\end{align}` (a definite description: well defined when the maximum exists) |
+| a fixed variable | `To describe the supporting lines of the region, fix $\kappa>0$ and define \[d_\kappa(x,z)\coloneqq x^2z-\kappa\,xz^2.\]`, `For the second regime, fix $b\in(0,\frac12)$ and put $\kappa_b\coloneqq\frac{2(1-b)}{b}$.` |
+| an implicit parameter | `For $b\in(0,\frac12]$, set \begin{equation}z_-(x)\coloneqq\frac{x+b-1}{2(1-b)},\qquad z_+(x)\coloneqq\frac{1-b-(1-2b)x}{2(1-b)}.\end{equation}` |
+| value and derivative | `define continuous functions $\varphi_w,\psi_w:[0,1]\to\R$ by $\varphi_w(1-w)=0$, $\psi_w(0)=0$, and DISPLAY` with `\varphi_w'(x)=\begin{cases}…\end{cases}` in the display, or `Let $\varphi_b,\psi_b:[0,1]\to\R$ be continuous, normalized by $\varphi_b(1-b)=0$ and $\psi_b(0)=0$, with derivatives DISPLAY` (read as `φ(x) = φ(a) + ∫_a^x φ'`; the derivative may be given on open pieces) |
+| a set of pairs | `For $w\in[\frac12,1)$, the support of $\gamma_{T_w}$ is \[S_w\coloneqq\{(x,1-x):0\le x\le1-w\}\cup\{(x,x+w-1):1-w\le x\le1\}.\]` (unions `\cup`, products `[a,b]\times\{c\}`) |
+| the variable of a result | `Let $w\in[\frac12,1)$.` |
 | law of a construction | `For a Borel measurable $T:[0,1]\to[0,1]$, let $\gamma_T$ denote the law of $(X,T(X))$ for $X$ uniformly distributed on $[0,1]$.` |
 
 ## Claims
@@ -100,6 +115,8 @@ citations.
 | maximum of a quantity | `Then \begin{equation}\max_{C\in\CC}|\rho(C)-\gamma(C)|=\Delta_0.\end{equation}` |
 | image sets | `\{\rho(C):C\in\CC,\ \gamma(C)=0\}=[-r_0,r_0]` |
 | extrema at a fixed value | `For every $n\in[-1,1]$, the maximum $\Lambda(n)$ and the minimum $\Lambda^{-1}(n)$ of $\nu(C^\top)$ over all copulas $C$ with $\nu(C)=n$ are each attained by exactly one copula.` |
+| an inequality on a square | `Then every $(x,z)\in[0,1]^2$ satisfies \begin{equation}\varphi_w(x)+\psi_w(z)\ge d_{\kappa_w}(x,z).\end{equation}` |
+| equality sets | `If $w>\frac12$, equality holds exactly on $S_w$, and if $w=\frac12$, it holds exactly on $S_{1/2}\cup([\frac12,1]\times\{\frac12\})$.`, `…, and equality holds exactly when $x=R_b(z)$.` (about the preceding inequality, for every point of its domain) |
 
 The readings are fixed and documented next to each construction in
 `Proofread/Grammar.lean` (parsing) and `Proofread/Doc.lean` (meaning). Run

@@ -3,6 +3,8 @@ import Mathlib.MeasureTheory.Integral.Bochner.Basic
 import Mathlib.MeasureTheory.Constructions.UnitInterval
 import Mathlib.Analysis.SpecialFunctions.Pow.Real
 import Mathlib.Analysis.Calculus.Deriv.Basic
+import Mathlib.MeasureTheory.Integral.IntervalIntegral.Basic
+import Mathlib.Analysis.Convex.Function
 
 /-! # The meaning of core terms
 
@@ -50,6 +52,14 @@ def measurableSet2 (A : I → I → Prop) : Prop := MeasurableSet {p : I × I | 
 def integrable (f : I → ℝ) : Prop := Integrable f
 def hasDerivWithin (f : ℝ → ℝ) (S : ℝ → Prop) (x d : ℝ) : Prop :=
   HasDerivWithinAt f d {y | S y} x
+noncomputable def intervalIntegral (a b : ℝ) (f : ℝ → ℝ) : ℝ := ∫ t in a..b, f t
+def intervalIntegrable (f : ℝ → ℝ) (a b : ℝ) : Prop := IntervalIntegrable f volume a b
+def compact2 (S : ℝ → ℝ → Prop) : Prop := IsCompact {p : ℝ × ℝ | S p.1 p.2}
+def convex2 (S : ℝ → ℝ → Prop) : Prop := Convex ℝ {p : ℝ × ℝ | S p.1 p.2}
+def symm2 (S : ℝ → ℝ → Prop) : Prop := ∀ a b, S a b → S (-a) (-b)
+def continuousOn (f : ℝ → ℝ) (D : ℝ → Prop) : Prop := ContinuousOn f {x | D x}
+def concaveOn (f : ℝ → ℝ) (D : ℝ → Prop) : Prop := ConcaveOn ℝ {x | D x} f
+def strictMonoOn (f : ℝ → ℝ) (D : ℝ → Prop) : Prop := StrictMonoOn f {x | D x}
 end Prelude
 
 noncomputable def Prim.denote {B : Nat → Type} : (p : Prim) → p.ty.denote B
@@ -62,6 +72,14 @@ noncomputable def Prim.denote {B : Nat → Type} : (p : Prim) → p.ty.denote B
   | .measurableSet2 => Prelude.measurableSet2
   | .integrable => Prelude.integrable
   | .hasDerivWithin => Prelude.hasDerivWithin
+  | .intervalIntegral => Prelude.intervalIntegral
+  | .intervalIntegrable => Prelude.intervalIntegrable
+  | .compact2 => Prelude.compact2
+  | .convex2 => Prelude.convex2
+  | .symm2 => Prelude.symm2
+  | .continuousOn => Prelude.continuousOn
+  | .concaveOn => Prelude.concaveOn
+  | .strictMonoOn => Prelude.strictMonoOn
 
 /-- Numerals: `0`, `1` and `(n : ℝ)` for larger `n`. -/
 def numVal : Nat → ℝ

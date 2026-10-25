@@ -56,6 +56,14 @@ inductive Prim where
   | integrable
   /-- `hasDerivWithin f S x d`: `f` has derivative `d` at `x` within `S`. -/
   | hasDerivWithin
+  /-- `intervalIntegral a b f`: the oriented integral `∫_a^b f`. -/
+  | intervalIntegral
+  /-- `intervalIntegrable f a b`: `f` is integrable between `a` and `b`. -/
+  | intervalIntegrable
+  /-- Shapes of a set of points of the plane: compact, convex, symmetric about the origin. -/
+  | compact2 | convex2 | symm2
+  /-- Properties of a real function on a domain: continuous, concave, strictly increasing. -/
+  | continuousOn | concaveOn | strictMonoOn
   deriving DecidableEq, Repr, Lean.ToExpr
 
 def Prim.ty : Prim → Ty
@@ -66,6 +74,10 @@ def Prim.ty : Prim → Ty
   | .measurableSet2 => Ty.set2 ⟶ .prop
   | .integrable => (.unit ⟶ .real) ⟶ .prop
   | .hasDerivWithin => Ty.rfun ⟶ (.real ⟶ .prop) ⟶ .real ⟶ .real ⟶ .prop
+  | .intervalIntegral => .real ⟶ .real ⟶ Ty.rfun ⟶ .real
+  | .intervalIntegrable => Ty.rfun ⟶ .real ⟶ .real ⟶ .prop
+  | .compact2 | .convex2 | .symm2 => (.real ⟶ .real ⟶ .prop) ⟶ .prop
+  | .continuousOn | .concaveOn | .strictMonoOn => Ty.rfun ⟶ (.real ⟶ .prop) ⟶ .prop
 
 /-- Untyped core terms with de Bruijn locals, indexed article definitions
 (`glob`) and vocabulary constants (`const`). Types are checked by `typeOf`;

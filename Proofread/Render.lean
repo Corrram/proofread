@@ -21,6 +21,10 @@ def Prim.tex : Prim → String
   | .leb => "\\lambda" | .borel => "\\operatorname{Borel}"
   | .measurableSet1 | .measurableSet2 => "\\operatorname{Meas}"
   | .integrable => "\\operatorname{Int}" | .hasDerivWithin => "\\operatorname{HasDeriv}"
+  | .intervalIntegral => "\\int" | .intervalIntegrable => "\\operatorname{Int}"
+  | .compact2 => "\\operatorname{compact}" | .convex2 => "\\operatorname{convex}"
+  | .symm2 => "\\operatorname{symmetric}" | .continuousOn => "\\operatorname{continuous}"
+  | .concaveOn => "\\operatorname{concave}" | .strictMonoOn => "\\operatorname{increasing}"
 
 /-- Binding strength for parentheses: propositions (1–4), relations (5), sums (6),
 products (7), signs (8), atoms (9). -/
@@ -53,6 +57,9 @@ partial def Tm.tex (cs gs : List String) (ls : List String) : Tm → String
   | .app (.app (.app (.app (.prim .hasDerivWithin) f) s) x) d =>
       "(" ++ f.tex cs gs ls ++ ")'(" ++ x.tex cs gs ls ++ ")=" ++ d.tex cs gs ls ++ "\\text{ within }" ++ s.tex cs gs ls
   | .app (.prim .leb) s => "\\lambda\\bigl(" ++ s.tex cs gs ls ++ "\\bigr)"
+  | .app (.app (.app (.prim .intervalIntegral) a) b) (.lam _ _ body) =>
+      let v := varNames.getD ls.length "t"
+      "\\int_{" ++ a.tex cs gs ls ++ "}^{" ++ b.tex cs gs ls ++ "}" ++ body.tex cs gs (v :: ls) ++ "\\,d" ++ v
   -- a domain predicate applied to an argument: read it about the argument
   | .app (.app (.lam _ _ (.lam _ _ b)) x) y => b.tex cs gs (y.tex cs gs ls :: x.tex cs gs ls :: ls)
   | .app (.lam _ _ b) x => b.tex cs gs (x.tex cs gs ls :: ls)
@@ -143,6 +150,9 @@ def defNameRaw (d : Doc) (i : Nat) : String :=
     | _ => clean key
   -- `\gamma^T` next to `\gamma_T`
   else if key.endsWith "^" then clean key ++ "Upper"
+  -- `R_b^-`, `z_+`
+  else if key.endsWith "^-" || key.endsWith "_-" then clean key ++ "Minus"
+  else if key.endsWith "^+" || key.endsWith "_+" then clean key ++ "Plus"
   else clean key
 
 /-- The Lean name of definition `i`: its symbol, or its phrase, made unique by the

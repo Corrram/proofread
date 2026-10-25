@@ -43,6 +43,14 @@ def primConst : Prim → Option Name
   | .measurableSet2 => some ``Prelude.measurableSet2
   | .integrable => some ``Prelude.integrable
   | .hasDerivWithin => some ``Prelude.hasDerivWithin
+  | .intervalIntegral => some ``Prelude.intervalIntegral
+  | .intervalIntegrable => some ``Prelude.intervalIntegrable
+  | .compact2 => some ``Prelude.compact2
+  | .convex2 => some ``Prelude.convex2
+  | .symm2 => some ``Prelude.symm2
+  | .continuousOn => some ``Prelude.continuousOn
+  | .concaveOn => some ``Prelude.concaveOn
+  | .strictMonoOn => some ``Prelude.strictMonoOn
   | _ => none
 
 def realLit (n : Nat) : TermElabM Expr := do
@@ -106,6 +114,9 @@ partial def readable (R : RCtx) (ls : List Expr) : Tm → TermElabM Expr
       (mkApp (Lean.mkConst ``Classical.propDecidable) c') v' r')
   | .undef .real => realLit 0
   | .undef .prop => pure (Lean.mkConst ``False)
+  | .undef (.fn a b) => do
+    withLocalDeclD `x (← tyExpr R.model a) fun v => do
+      mkLambdaFVars #[v] (← readable R (v :: ls) (.undef b))
   | .undef t => do
     let e := mkApp3 (Lean.mkConst ``Ty.default) (mkApp (Lean.mkConst ``Model.base) R.model)
       (mkApp (Lean.mkConst ``Model.default) R.model) (toExpr t)

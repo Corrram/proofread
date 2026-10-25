@@ -145,13 +145,15 @@ def startsFactor : MTok → Bool
   | .cmd n => n == w!"frac" || n == w!"int" || n == w!"min" || n == w!"max" || n == w!"widehat"
       || n == w!"hat" || (!(relOf (.cmd n)).isSome && n != w!"mapsto" && n != w!"to" &&
         n != w!"cdot" && n != w!"qquad" && n != w!"quad" && n != w!"times" && n != w!"top" && n != w!"perp" &&
+        n != w!"cup" && n != w!"cap" &&
         n != w!"approx" && n != w!"ldots")
   | _ => false
 
 /-- Heads that may be applied to a parenthesized argument list. -/
 def appHead : MT → Bool
   | .id _ | .sub _ _ | .hat _ | .app _ _ => true
-  | .sup _ (.id n) => n == w!"\\top" || n == w!"\\perp"
+  -- `f'(x)`, `R_b^-(z)`
+  | .sup _ (.id n) => n == w!"\\top" || n == w!"\\perp" || n == [39] || n == [45] || n == [43]
   -- the inverse function `f^{-1}`
   | .sup (.id _) (.neg (.num 1)) => true
   | _ => false
@@ -205,6 +207,8 @@ def run : Nat → Mode → List MTok → R
       run f (.postfix bar x) rest
   | f + 1, .postfix bar x, ts =>
     match ts with
+    -- `f'`: the derivative, written as the superscript `'`
+    | .sym 39 :: rest => run f (.postfix bar (.sup x (.id [39]))) rest
     | .sym 94 :: rest => do
       let (e, rest') ← run f .group rest
       run f (.postfix bar (.sup x e)) rest'
@@ -325,8 +329,10 @@ def run : Nat → Mode → List MTok → R
     | .digit d :: rest => some (.num d, rest)
     | .id n :: rest => some (.id n, rest)
     | .cmd n :: rest => some (.id ([92] ++ n), rest)
-    -- `g_*`
+    -- `g_*`, `R^-`, `R^+`
     | .sym 42 :: rest => some (.id [42], rest)
+    | .sym 45 :: rest => some (.id [45], rest)
+    | .sym 43 :: rest => some (.id [43], rest)
     | _ => none
   | _ + 1, .args acc, ts => some (.tuple acc.reverse, ts)
   | f + 1, .list close acc, ts => do
@@ -379,6 +385,10 @@ where
       | .sym 45 :: rest => do
         let (y, rest') ← run g (.product bar) rest
         addRest g bar (.minus x y) rest'
+      -- `A\cup B`
+      | .cmd [99, 117, 112] :: rest => do
+        let (y, rest') ← run g (.product bar) rest
+        addRest g bar (.app (.id w!"\\cup") [x, y]) rest'
       | _ => some (x, ts)
   mulRest : Nat → Bool → MT → List MTok → R
     | 0, _, _, _ => none
@@ -390,6 +400,10 @@ where
       | .sym 47 :: rest => do
         let (y, rest') ← run g (.factor bar) rest
         mulRest g bar (.div x y) rest'
+      -- `A\times B`
+      | .cmd [116, 105, 109, 101, 115] :: rest => do
+        let (y, rest') ← run g (.factor bar) rest
+        mulRest g bar (.app (.id w!"\\times") [x, y]) rest'
       | t :: _ =>
         if startsFactor t || (t == .sym 124 && !bar) then
           match run g (.atom bar) ts with

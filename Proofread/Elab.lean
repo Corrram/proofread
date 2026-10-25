@@ -27,6 +27,19 @@ Readings (`x`, `y` range over the domain of the noun or binder):
 * `the map $λ$ sends F to G` — `∀x, F(λ x) = G(x)`.
 * `only X attains it` — `X` attains the topic extremum, and no other element does.
 * `X is P of Y` — the article's relation `P` holds of `X` and `Y`.
+* `fix $b\in B$ and set|put|define DEFS` — the definitions under the binder `b`, which
+  stays bound for the following sentences of the section.
+* `For $b\in B$, set $f(x)\coloneqq e$` where the symbol `f` does not show `b` —
+  `f` takes `b` as an implicit parameter, supplied from the scope at each use.
+* a family defined again on a further parameter domain — one family on the union,
+  defined only if no parameter lies in both domains.
+* `define continuous functions $f:A\to\R$ by $f(a)=c$ and $f'(x)=g(x)$` —
+  `f(x) = c + ∫_a^x g` for `x ∈ A`, defined when `g` is integrable there; where
+  no piece of a piecewise `g` applies, the integrand is `0`.
+* `every $(x,z)\in A^2$ satisfies $a\ge b$`, then `equality holds exactly on $S$`
+  (`when φ`) — `∀ x z ∈ A, a = b ↔ (x,z) ∈ S` (`↔ φ`).
+* `Let $x\in A$.` in a result — `x` ranges over `A` in the rest of the result; a
+  later `If φ,` about `x` is a hypothesis.
 -/
 namespace Proofread
 open Grammar
@@ -128,6 +141,14 @@ structure St where
   /-- Binders of the current result that later sentences of the result inherit. -/
   envBinders : List BindInfo := []
   topic : Topic := .none
+  /-- Variables fixed in the running text (`fix $b\in B$`), by section. -/
+  fixed : List (Nat × BindInfo) := []
+  /-- Definitions made under a binder whose symbol does not show its variable
+  (`z_-(x)` under `For $b\in B$`): the variable, supplied from the scope at each use. -/
+  implicits : List (Nat × Codes) := []
+  /-- The binders and the formula of the latest inequality claimed for every point
+  of a domain (for `equality holds exactly on …`). -/
+  lastIneq : Option (List BindInfo × MT) := none
   deriving Inhabited, Lean.ToExpr
 
 abbrev M := ExceptT Err (StateM St)
@@ -192,9 +213,26 @@ def lookupGlob (key : Codes) : M (Option (Nat × Glob)) := do
 
 def addGlob (g : Glob) (v : Tm) : M Nat := do
   let st ← get
-  if !g.key.isEmpty && (st.globs.any (·.key == g.key)) then fail E.redefined g.key
-  set { st with globs := st.globs ++ [g], values := st.values ++ [v] }
-  pure st.globs.length
+  match (if g.key.isEmpty then none else st.globs.findIdx? (·.key == g.key)) with
+  | some i =>
+    -- a family extended to a further parameter domain (`κ_w` for `w∈[1/2,1)`, then `κ_b`
+    -- for `b∈(0,1/2)`): from here on, the symbol names one family on the union, which
+    -- is the earlier family on its domain; its definedness asks that a parameter in
+    -- both domains have one value. Earlier uses keep the earlier family.
+    let old := st.globs[i]!
+    match old.family, g.family, old.doms.head?, g.doms.head?, v, old.ty with
+    | true, true, some (some p1), some (some p2), .lam _ _ b2, .fn t cod =>
+      if old.ty != g.ty then fail E.redefined g.key else
+      let dom := Tm.lam t .tt (.or (.app p1 (.loc 0)) (.app p2 (.loc 0)))
+      let val := Tm.lam t (.app dom (.loc 0))
+        (.cases (.app p1 (.loc 0)) (.app (.glob i) (.loc 0)) (.cases (.app p2 (.loc 0)) b2 (.undef cod)))
+      let rest := match g.doms with | _ :: r => r | [] => []
+      set { st with globs := st.globs ++ [{ old with doms := some dom :: rest }], values := st.values ++ [val] }
+      pure st.globs.length
+    | _, _, _, _, _, _ => fail E.redefined g.key
+  | none =>
+    set { st with globs := st.globs ++ [g], values := st.values ++ [v] }
+    pure st.globs.length
 
 def addClaim (c : Claim) : M Nat := do
   let st ← get
@@ -213,6 +251,15 @@ def lookupLocal : Scope → Codes → Option (Nat × Ty)
 
 /-- Shift free local indices `≥ c` by `k`. -/
 abbrev shift := Tm.shift
+
+/-- The implicit parameter of definition `i`, as a local of the scope. -/
+def implicitArg (sc : Scope) (i : Nat) : M (Option (Tm × Ty)) := do
+  match (← get).implicits.lookup i with
+  | some n =>
+    match lookupLocal sc n with
+    | some (j, t) => pure (some (.loc j, t))
+    | none => fail E.free n
+  | none => pure none
 
 /-- Closed terms (predicates of globals) used under `n` binders need no shift,
 but a predicate applied to a local must be written as an application. -/
@@ -315,6 +362,14 @@ def constMT : MT → Option Tm
 /-- The point-free subject: a term substituted for unapplied functions on its type. -/
 abbrev PF := Option (Tm × Ty)
 
+/-- Definition `i` applied to its implicit parameter, if it has one. -/
+def withImplicit (sc : Scope) (i : Nat) (g : Glob) : M (Tm × Ty × List (Option Tm)) := do
+  match ← implicitArg sc i with
+  | some a => do
+    let (t, ty) ← applyAll (.glob i) g.ty g.doms [a]
+    pure (t, ty, g.doms.drop 1)
+  | none => pure (.glob i, g.ty, g.doms)
+
 /-- Elaborate a formula. Fuel bounds the recursion (kernel-reducible). -/
 def term : Nat → Scope → PF → MT → M (Tm × Ty)
   | 0, _, _, _ => fail E.unsupported
@@ -394,10 +449,12 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
         match c with
         | some (h, g) =>
           if g.family then fail E.unsupported key
-          else match pf, g.ty with
+          else do
+            let (hd, hty, hdoms) ← withImplicit sc h g
+            match pf, hty with
             | some (s, sty), .fn a _ =>
-              if a == sty then applyAll (.glob h) g.ty g.doms [(s, sty)] else pure (.glob h, g.ty)
-            | _, _ => pure (.glob h, g.ty)
+              if a == sty then applyAll hd hty hdoms [(s, sty)] else pure (hd, hty)
+            | _, _ => pure (hd, hty)
         | none =>
         let (h, g) ← liftO (← lookupGlob key) E.undefined key
         if !g.family then fail E.unsupported key
@@ -416,9 +473,17 @@ def term : Nat → Scope → PF → MT → M (Tm × Ty)
         pure (.the dty (conjAll (dom ++ [.eq fy.1 (shift 1 0 a')])), dty)
       | _ => fail E.type fn
     | .app hd args => do
-      let (h, hty, doms) ← head f sc hd
-      let xs ← args.mapM (term f sc pf)
-      applyAll h hty doms xs
+      match hd, args with
+      | .id op, [x, y] =>
+        if op == w!"\\cup" || op == w!"\\times" then setOp f sc pf op x y
+        else do
+          let (h, hty, doms) ← head f sc hd
+          let xs ← args.mapM (term f sc pf)
+          applyAll h hty doms xs
+      | _, _ => do
+        let (h, hty, doms) ← head f sc hd
+        let xs ← args.mapM (term f sc pf)
+        applyAll h hty doms xs
     | .int (.num 0) (.num 1) body v => do
       if (lookupLocal sc v).isSome then fail E.shadow v
       let b ← asReal (← term f ((v, .unit) :: sc) (pf.map fun (s, t) => (shift 1 0 s, t)) body)
@@ -575,13 +640,60 @@ where
           let (i, gl) ← liftO (← lookupGlob n) E.undefined n
           pure (.glob i, gl.ty, gl.doms)
       | .sub (.id key) i => do
+        -- a constant with a subscript (`z_-`), unless the index is a variable
+        let ck := match i with
+          | .id x => if (lookupLocal sc x).isSome then none else symKey hd
+          | _ => symKey hd
+        let c ← match ck with
+          | some k => lookupGlob k
+          | none => pure none
+        match c with
+        | some (h, gl) =>
+          if gl.family then fail E.unsupported key else withImplicit sc h gl
+        | none =>
         let (h, gl) ← liftO (← lookupGlob key) E.undefined key
+        let a ← term g sc none i
+        let (t, ty) ← applyAll (.glob h) gl.ty gl.doms [a]
+        pure (t, ty, gl.doms.drop 1)
+      -- a family written with a sub- and a superscript (`R_b^-`)
+      | .sup (.sub (.id key) i) (.id s) => do
+        let k := key ++ w!"^" ++ s
+        let (h, gl) ← liftO (← lookupGlob k) E.undefined k
+        if !gl.family then fail E.unsupported k
         let a ← term g sc none i
         let (t, ty) ← applyAll (.glob h) gl.ty gl.doms [a]
         pure (t, ty, gl.doms.drop 1)
       | _ => do
         let (t, ty) ← term g sc none hd
         pure (t, ty, [])
+  /-- `A\cup B` (sets of the same kind) and `A\times B` (sets of numbers; a number
+  is the set containing it). -/
+  setOp : Nat → Scope → PF → Codes → MT → MT → M (Tm × Ty)
+    | 0, _, _, _, _, _ => fail E.unsupported
+    | g + 1, sc, pf, op, x, y => do
+      let a ← term g sc pf x
+      let b ← term g sc pf y
+      if op == w!"\\cup" then
+        if a.2 != b.2 then fail E.type
+        match a.2 with
+        | .fn t1 .prop =>
+          pure (.lam t1 .tt (.or (.app (shift 1 0 a.1) (.loc 0)) (.app (shift 1 0 b.1) (.loc 0))), a.2)
+        | .fn t1 (.fn t2 .prop) =>
+          let ap := Tm.app (.app (shift 2 0 a.1) (.loc 1)) (.loc 0)
+          let bp := Tm.app (.app (shift 2 0 b.1) (.loc 1)) (.loc 0)
+          pure (.lam t1 .tt (.lam t2 .tt (.or ap bp)), a.2)
+        | _ => fail E.type
+      else do
+        let set1 (p : Tm × Ty) : M Tm := do
+          match p.2 with
+          | .fn .real .prop => pure p.1
+          | _ => do
+            let v ← asReal p
+            pure (.lam .real .tt (.eq (.loc 0) (shift 1 0 v)))
+        let sa ← set1 a
+        let sb ← set1 b
+        pure (.lam .real .tt (.lam .real .tt (.and (.app (shift 2 0 sa) (.loc 1)) (.app (shift 2 0 sb) (.loc 0)))),
+          .fn .real (.fn .real .prop))
   member : Nat → Scope → Tm × Ty → MT → M Tm
     | 0, _, _, _ => fail E.unsupported
     | g + 1, sc, x, dom =>

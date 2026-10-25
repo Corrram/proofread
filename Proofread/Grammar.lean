@@ -104,12 +104,23 @@ def display (cs : List Chunk) : Option (MT × List Codes × List Chunk) :=
     some (m, ls, rest)
   | _ => none
 
-/-- Binder formulas `x\in A` or `u,v\in A`. -/
+/-- Binder formulas `x\in A`, `u,v\in A`, or `(x,z)\in A^2` (each coordinate in `A`). -/
 def binderMath (ts : List MTok) : Option (List Codes × MT) := do
   let i ← ts.findIdx? (· == .cmd w!"in")
-  let vars := (ts.take i).filter (· != .sym 44)
+  let pre := ts.take i
+  let (pre, square) := match pre with
+    | .sym 40 :: r => match r.reverse with
+      | .sym 41 :: r' => (r'.reverse, true)
+      | _ => (pre, false)
+    | _ => (pre, false)
+  let vars := pre.filter (· != .sym 44)
   let names ← vars.mapM fun t => match t with | .id n => some n | _ => none
   let dom ← Math.parseFormula (ts.drop (i + 1))
+  let dom ← if square then
+      match dom with
+      | .sup d (.num k) => if k == names.length then some d else none
+      | _ => none
+    else some dom
   if names.isEmpty then none else some (names, dom)
 
 /-- Words until (not including) a stop word; fails if a non-word chunk occurs. -/
@@ -172,8 +183,20 @@ def marker (cs : List Chunk) : Topic × List Chunk :=
       match wordsTo r with
       | some r' => (.none, r')
       | none => tryAll wMarkers
-    | none => tryAll wMarkers
+    | none =>
+      -- a purpose: `To describe the supporting lines of the region,`
+      match purpose cs with
+      | some r => (.none, r)
+      | none => tryAll wMarkers
 where
+  /-- `To WORDS,` with at least two words. -/
+  purpose (cs : List Chunk) : Option (List Chunk) := do
+    let r ← kw [w!"to"] cs
+    let ws := r.takeWhile (fun c => match c with | .w _ => true | _ => false)
+    if ws.length < 2 then none else
+    match r.drop ws.length with
+    | .p 44 :: r' => some r'
+    | _ => none
   /-- Words up to a comma, then relative clauses `whose|which|where WORDS,`. -/
   wordsTo (cs : List Chunk) : Option (List Chunk) :=
     let ws := cs.takeWhile (fun c => match c with | .w _ => true | _ => false)
@@ -289,6 +312,18 @@ inductive Clause where
   attained by exactly one NOUN`: each value is the extremum of `F` over the
   elements with `φ`, attained by exactly one of them. -/
   | extremaOver (items : List (Bool × MT)) (f : MT) (noun : List Codes) (v : Codes) (cond : MT)
+  /-- `equality holds exactly on $S$` (after an inequality `a ≥ b` for every `x` in
+  a domain): for every such `x`, `a = b` exactly when `x ∈ S`. -/
+  | equalityOn (s : MT)
+  /-- `equality holds exactly when $φ$`: for every `x`, `a = b ↔ φ`. -/
+  | equalityWhen (φ : MT)
+  /-- `if $φ$, CLAUSE`: the clause under the hypothesis `φ` about variables
+  that are already bound. -/
+  | ifThen (cond : MT) (c : Clause)
+  /-- `$X$ is ADJ, ADJ and ADJ`: properties of a set of points of the plane
+  (`compact`, `convex`, `centrally symmetric`) or of a function on its domain
+  (`continuous`, `concave`, `strictly increasing`). -/
+  | adjectives (s : MT) (adjs : List (List Codes))
   deriving Repr, Inhabited
 
 /-- A clause with the citations that justify it, and its own binders
@@ -365,11 +400,50 @@ def mapList : Nat → List Chunk → List MT → Option (List MT × List Chunk)
     | some r' => mapList f r' (m :: acc)
     | none => some ((m :: acc).reverse, r)
 
+/-- Adjectives of the core: shapes of sets of the plane and properties of functions. -/
+def wAdjectives : List (List Codes) :=
+  [[w!"compact"], [w!"convex"], [w!"centrally", w!"symmetric"], [w!"continuous"], [w!"concave"],
+   [w!"strictly", w!"increasing"]]
+
+def adjective (cs : List Chunk) : Option (List Codes × List Chunk) :=
+  wAdjectives.findSome? fun a => (kw a cs).map (a, ·)
+
+/-- `ADJ, ADJ and ADJ`. -/
+def adjectiveList : Nat → List Chunk → List (List Codes) → Option (List (List Codes) × List Chunk)
+  | 0, _, _ => none
+  | f + 1, cs, acc => do
+    let (a, r) ← adjective cs
+    let acc := a :: acc
+    let next := (punct 44 r >>= fun r' => (kw [w!"and"] r').getD r' |> some) <|> kw [w!"and"] r
+    match next with
+    | some r' =>
+      if (adjective r').isSome then adjectiveList f r' acc else some (acc.reverse, r)
+    | none => some (acc.reverse, r)
+
 /-- One clause, without its citations. Must be followed by a clause boundary. -/
 def clause (cs : List Chunk) : Option (Clause × List Chunk) :=
   -- It holds that DISPLAY
   match kw [w!"it", w!"holds", w!"that"] cs with
   | some r => do let (m, _, r') ← display r; some (.holds m, r')
+  | none =>
+  -- equality holds exactly on $S$ | when $φ$; it holds exactly on $S$
+  -- $X$ is ADJ, ADJ and ADJ
+  match (do
+      let (m, r) ← formula cs
+      let r1 ← kw [w!"is"] r
+      let (adjs, r2) ← adjectiveList 6 r1 []
+      some (Clause.adjectives m adjs, r2)) with
+  | some res => some res
+  | none =>
+  match (do
+      let r ← kw [w!"equality", w!"holds", w!"exactly"] cs <|> kw [w!"it", w!"holds", w!"exactly"] cs
+      match kw [w!"on"] r with
+      | some r1 => do let (m, r2) ← formula r1; some (Clause.equalityOn m, r2)
+      | none => do
+        let r1 ← kw [w!"when"] r
+        let (m, r2) ← formula r1
+        some (Clause.equalityWhen m, r2)) with
+  | some res => some res
   | none =>
   -- [both] [the] [parameter] maps $f$ and $g$ are strictly increasing
   match (do
@@ -587,6 +661,15 @@ def cclause (cs : List Chunk) : Option (CClause × List Chunk) :=
       some (⟨pre ++ [l], .fact m, []⟩, r3)
     | none => none
   | none => do
+    -- a hypothesis about bound variables: `if $φ$, CLAUSE`
+    let (hyp, r0) : Option MT × List Chunk :=
+      match (do
+          let r ← kw [w!"if"] r0
+          let (m, r') ← formula r
+          let r'' ← punct 44 r'
+          some (m, r'')) with
+      | some (m, r) => (some m, r)
+      | none => (none, r0)
     -- a clause's own binder: `for $b\in B$, CLAUSE`
     let (bs, r0) : List Bind × List Chunk :=
       match kw [w!"for"] r0 >>= mathChunk with
@@ -596,6 +679,7 @@ def cclause (cs : List Chunk) : Option (CClause × List Chunk) :=
         | _, _ => ([], r0)
       | none => ([], r0)
     let (c, r1) ← clause r0
+    let c := match hyp with | some m => Clause.ifThen m c | none => c
     let post := (kw [w!"by"] r1 >>= cite) <|> (kw [w!"as", w!"specified", w!"in"] r1 >>= cite)
     match post with
     | some (l, r2) => some (⟨pre ++ [l], c, bs⟩, r2)
@@ -675,7 +759,49 @@ inductive Sent where
   under a binder `For B, set $f(x)\coloneqq e$.`: definitions of constants (or of
   functions of the binder's variable), possibly several, each `\coloneqq`. -/
   | constDefs (bind : Option Bind) (defs : List MT) (labels : List Codes)
+  /-- `fix $B$ [and define|set|put DEFS]`: the binder stays fixed for the following
+  sentences of the section (its variable names the same object until the section
+  ends or the variable is fixed again); the definitions are made under it. -/
+  | fix (bind : Bind) (defs : List MT) (labels : List Codes)
+  /-- `Let $x\in A$.` in a result: `x` is bound for the rest of the result. -/
+  | assume (bind : Bind)
+  /-- Functions given by a value at one point and their derivative:
+  `[For B, set DEFS, and] define continuous functions $f,g:A\to\R$ by $f(a)=c$, …,
+  and DISPLAY` or `Let $f,g:A\to\R$ be continuous, normalized by $f(a)=c$ and …,
+  with derivatives DISPLAY`, where the display gives `f'(x)` (piecewise). -/
+  | defDeriv (bind : Option Bind) (sets : List MT) (names : List MT) (dom cod : MT) (anchors : List MT)
+      (derivs : MT) (labels : List Codes)
   deriving Repr, Inhabited
+
+/-- `$f,g:A\to B$`: several names with one signature. -/
+def namesSig (ts : List MTok) : Option (List MT × MT × MT) := do
+  let i ← ts.findIdx? (· == .sym 58)
+  let j ← ts.findIdx? (· == .cmd w!"to")
+  if j < i then none else
+  let rec split : List MTok → List MTok → List (List MTok) → List (List MTok)
+    | [], cur, acc => (cur.reverse :: acc).reverse
+    | t :: rest, cur, acc => if t == .sym 44 then split rest [] (cur.reverse :: acc) else split rest (t :: cur) acc
+  let names ← (split (ts.take i) [] []).mapM Math.parseFormula
+  let dom ← Math.parseFormula ((ts.drop (i + 1)).take (j - i - 1))
+  let cod ← Math.parseFormula (ts.drop (j + 1))
+  some (names, dom, cod)
+
+/-- Formulas separated by `,`, `, and` or `and` (the values of functions at points). -/
+def anchorList : Nat → List Chunk → List MT → Option (List MT × List Chunk)
+  | 0, _, _ => none
+  | f + 1, cs, acc =>
+    match formula cs with
+    | some (m, r) =>
+      let r' := (punct 44 r).getD r
+      let r'' := (kw [w!"and"] r').getD r'
+      anchorList f r'' (m :: acc)
+    | none => if acc.isEmpty then none else some (acc.reverse, cs)
+
+/-- A fixed variable: `$b\in B$`, or a condition `$\kappa>0$`. -/
+def fixBinder (ts : List MTok) : Option Bind :=
+  match binderMath ts with
+  | some (vs, d) => some (.every vs d)
+  | none => (Math.parseFormula ts).map Bind.ifCond
 
 def isDefeq : MT → Bool
   | .chain _ ((.defeq, _) :: _) => true
@@ -712,7 +838,23 @@ def sentence (cs : List Chunk) : Option Sent :=
   let (topic, cs) := marker cs
   -- let $S$ denote the class of NOUNS, that is, NP.
   match kw [w!"let"] cs with
-  | some r => do
+  | some r =>
+    -- `Let $x\in A$.`
+    (do
+      let (ts, r1) ← mathChunk r
+      let (vs, d) ← binderMath ts
+      if isEnd r1 then some (.assume (.every vs d)) else none) <|>
+    -- `Let $f,g:A\to B$ be continuous, normalized by …, with derivatives DISPLAY.`
+    (do
+      let (ts, r1) ← mathChunk r
+      let (names, dom, cod) ← namesSig ts
+      let r2 ← kw [w!"be", w!"continuous"] r1
+      let r3 ← punct 44 r2 >>= kw [w!"normalized", w!"by"]
+      let (anchors, r4) ← anchorList 6 r3 []
+      let r5 ← kw [w!"with", w!"derivatives"] r4
+      let (m, ls, r6) ← display r5
+      if isEnd r6 then some (.defDeriv none [] names dom cod anchors m ls) else none) <|>
+    (do
     let (sym, r1) ← formula r
     let r2 ← kw [w!"denote", w!"the"] r1
     let r2 ← classOf r2
@@ -723,7 +865,7 @@ def sentence (cs : List Chunk) : Option Sent :=
     if isEnd r3 then some (.defClass sym plural []) else do
     let r4 ← punct 44 r3 >>= kw [w!"that", w!"is"] >>= punct 44
     let np := r4.dropLast
-    if isEnd (r4.drop np.length) then some (.defClass sym plural np) else none
+    if isEnd (r4.drop np.length) then some (.defClass sym plural np) else none)
   | none =>
   -- `[We] denote by $S$ the class of NOUNS.`, `[We] denote the class of NOUNS by $S$.`
   let cs1 := (kw [w!"we"] cs).getD cs
@@ -758,8 +900,19 @@ def sentence (cs : List Chunk) : Option Sent :=
       if isEnd r7 then some (.defBy s pieces ls (some (φ, vs, dom))) else none) <|>
     constDefsOf none r
   | none =>
-  match kw [w!"set"] cs with
+  match kw [w!"set"] cs <|> kw [w!"put"] cs with
   | some r => constDefsOf none r
+  | none =>
+  -- fix $B$ [and define|set|put DEFS].
+  match kw [w!"fix"] cs with
+  | some r => do
+    let (ts, r1) ← mathChunk r
+    let b ← fixBinder ts
+    if isEnd r1 then some (.fix b [] []) else do
+    let r2 ← kw [w!"and"] r1
+    let r3 ← kw [w!"define"] r2 <|> kw [w!"set"] r2 <|> kw [w!"put"] r2
+    let (items, ls, r4) ← defList 6 r3 [] []
+    if isEnd (trailer r4) && !items.isEmpty && items.all isDefeq then some (.fix b items ls) else none
   | none =>
   -- We say that a N $x$ is PHRASE of a ADJ $sig$ if $φ$ for all $u,v\in A$.
   match kw [w!"we", w!"say", w!"that", w!"a"] cs with
@@ -850,7 +1003,7 @@ where
         | some r2 => (do
           let (m, r3) ← formula r2
           let r4 ← kw [w!"and", w!"let"] r3
-          letBe b [m] r4) <|> constDefsOf (some b) r2
+          letBe b [m] r4) <|> derivAfterSet b r2 <|> constDefsOf (some b) r2
         | none =>
         -- For B, the NAME $sig$ reads DISPLAY.
         match defReads b r1 with
@@ -873,6 +1026,18 @@ where
       (do
         let cs ← clauses 8 cs []
         some (.claims topic [] cs))
+  /-- `set DEFS, and define continuous functions $f,g:A\to B$ by ANCHORS, and DISPLAY.` -/
+  derivAfterSet (b : Bind) (cs : List Chunk) : Option Sent := do
+    let (items, _, r1) ← defList 6 cs [] []
+    if !items.all isDefeq then none else
+    let r2 ← (punct 44 r1 >>= kw [w!"and"]) <|> kw [w!"and"] r1
+    let r3 ← kw [w!"define", w!"continuous", w!"functions"] r2
+    let (ts, r4) ← mathChunk r3
+    let (names, dom, cod) ← namesSig ts
+    let r5 ← kw [w!"by"] r4
+    let (anchors, r6) ← anchorList 6 r5 []
+    let (m, ls, r7) ← display r6
+    if isEnd r7 then some (.defDeriv (some b) items names dom cod anchors m ls) else none
   defReads (b : Bind) (cs : List Chunk) : Option Sent := do
     let r ← kw [w!"the"] cs
     let (name, r1) ← wordsUntil [] 6 r [] <|> (do
