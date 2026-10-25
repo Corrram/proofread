@@ -57,6 +57,16 @@ partial def Tm.tex (cs gs : List String) (ls : List String) : Tm → String
   | .app (.app (.app (.app (.prim .hasDerivWithin) f) s) x) d =>
       "(" ++ f.tex cs gs ls ++ ")'(" ++ x.tex cs gs ls ++ ")=" ++ d.tex cs gs ls ++ "\\text{ within }" ++ s.tex cs gs ls
   | .app (.prim .leb) s => "\\lambda\\bigl(" ++ s.tex cs gs ls ++ "\\bigr)"
+  -- a property of a function on a domain: `continuous(f) on {x : …}`
+  | .app (.app (.prim .continuousOn) f) (.lam _ _ body) =>
+      let v := varNames.getD ls.length "t"
+      Prim.continuousOn.tex ++ "(" ++ f.tex cs gs ls ++ ")\\text{ on }\\{" ++ v ++ ":" ++ body.tex cs gs (v :: ls) ++ "\\}"
+  | .app (.app (.prim .concaveOn) f) (.lam _ _ body) =>
+      let v := varNames.getD ls.length "t"
+      Prim.concaveOn.tex ++ "(" ++ f.tex cs gs ls ++ ")\\text{ on }\\{" ++ v ++ ":" ++ body.tex cs gs (v :: ls) ++ "\\}"
+  | .app (.app (.prim .strictMonoOn) f) (.lam _ _ body) =>
+      let v := varNames.getD ls.length "t"
+      Prim.strictMonoOn.tex ++ "(" ++ f.tex cs gs ls ++ ")\\text{ on }\\{" ++ v ++ ":" ++ body.tex cs gs (v :: ls) ++ "\\}"
   | .app (.app (.app (.prim .intervalIntegral) a) b) (.lam _ _ body) =>
       let v := varNames.getD ls.length "t"
       "\\int_{" ++ a.tex cs gs ls ++ "}^{" ++ b.tex cs gs ls ++ "}" ++ body.tex cs gs (v :: ls) ++ "\\,d" ++ v
