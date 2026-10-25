@@ -111,6 +111,8 @@ The same source gives the two readable outputs:
   the trust boundary.
 * [Vocabularies and models](docs/vocabularies.md): where the meaning of words
   that the article does not define comes from.
+* [Status and next constructions](docs/roadmap.md): what the exemplars cover
+  and which constructions the remaining sentences need.
 
 ## Layout
 
