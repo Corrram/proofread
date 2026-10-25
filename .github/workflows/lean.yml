@@ -15,15 +15,26 @@ jobs:
           build: 'true'
           test: 'false'
           use-mathlib-cache: 'true'
-      - name: Build the checker and certify the example article
-        run: lake build proofread Squares
+      - name: Build the checker and certify the example articles
+        run: lake build proofread Squares Demo Refuted
       - name: Quick check of the example article
         run: lake exe proofread check examples/Squares/article.tex --claims --prose
+      - name: The draft of the getting-started guide gives the findings the guide shows
+        run: |
+          lake exe proofread check examples/Demo/draft.tex > "$RUNNER_TEMP/draft.check.txt" || true
+          diff examples/Demo/draft.check.txt "$RUNNER_TEMP/draft.check.txt"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Every claim of the example is verified
-        run: python scripts/proofread_diagnostics.py examples/Squares/article.proofread.json --strict --verified
+      - name: Every claim of the examples is verified
+        run: |
+          python scripts/proofread_diagnostics.py examples/Squares/article.proofread.json --strict --verified
+          python scripts/proofread_diagnostics.py examples/Demo/article.proofread.json --strict --verified
+      - name: The refuted theorem is reported false, and the claims resting on it unverified
+        run: |
+          if python scripts/proofread_diagnostics.py tests/Refuted/article.proofread.json > "$RUNNER_TEMP/refuted.txt"; then exit 1; fi
+          grep -q "error: statement (claim 2) is false as stated" "$RUNNER_TEMP/refuted.txt"
+          grep -q "(claim 5) compiled but not verified: it rests on claim 2, which is refuted" "$RUNNER_TEMP/refuted.txt"
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -32,4 +43,4 @@ jobs:
       - name: Reader tests
         run: npm test
       - name: Reports and dependency pins are up to date
-        run: git diff --exit-code -- lean-toolchain lakefile.toml lake-manifest.json examples
+        run: git diff --exit-code -- lean-toolchain lakefile.toml lake-manifest.json examples tests

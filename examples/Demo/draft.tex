@@ -1,0 +1,49 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{proofread}
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}[lemma]{Theorem}
+\newtheorem{corollary}[lemma]{Corollary}
+\title{A number and its reciprocal}
+\author{Proofread demo}
+\begin{document}
+\maketitle
+
+A positive number and its reciprocal never sum to less than two.
+This note is the demonstration article of Proofread.
+Every sentence of its results and proofs is compiled to Lean, and every claim is verified.
+
+\section{The bound}
+
+Define $f:\mathbb{R}\to\mathbb{R}$ by $f(x)\coloneqq x+\frac1x$.
+
+\begin{lemma}\label{lem:identity}
+For every $x\in(0,\infty)$, $f(x)-2=\frac{(x-1)^2}{x}$.
+\end{lemma}
+
+\begin{proof}
+Let $x\in(0,\infty)$.
+Then $f(x)-2=x+\frac1x-2=\frac{x^2-2x+1}{x}=\frac{(x-1)^2}{x}$.
+\end{proof}
+
+\begin{theorem}\label{thm:bound}
+For every $x\in(0,\infty)$, $f(x)>2$.
+\end{theorem}
+
+\begin{proof}
+Let $x\in(0,\infty)$.
+Then $\frac{(x-1)^2}{x}\ge0$.
+By Lemma~\ref{lem:identity}, $g(x)-2=\frac{(x-1)^2}{x}\ge0$.
+\end{proof}
+
+\begin{corollary}\label{cor:min}
+The function $f$ attains its minimum on $(0,\infty)$ at $1$.
+\end{corollary}
+
+\begin{proof}
+By Theorem~\ref{thm:bound}, $f(1)=2\le f(x)$ for every $x\in(0,\infty)$.
+\end{proof}
+
+The bound is the inequality between the arithmetic and the geometric mean of a positive number and its reciprocal.
+
+\end{document}

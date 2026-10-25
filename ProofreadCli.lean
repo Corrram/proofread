@@ -1,5 +1,6 @@
 import Proofread.Check
 import Proofread.Meta
+import Proofread.Report
 import Proofread.Library.UnitSquare
 
 /-! The `proofread` command line.
@@ -8,6 +9,11 @@ import Proofread.Library.UnitSquare
   compiles the article natively and prints its diagnostics (fast; certifies
   nothing). Projects with their own vocabulary define a three-line executable
   calling `Proofread.checkArticle`.
+* `proofread init ARTICLE.tex [--name NAME] [--vocab core|unitsquare]` writes the
+  four Lean files of an article next to it (`Compiled`, `Article`, `Proofs`,
+  `Certified`, in namespace `NAME`, by default the article's folder name), with a
+  stub proof of every claim, and prints the `lean_lib` entry for `lakefile.toml`.
+  It never overwrites an existing file.
 * `proofread prepare ARTICLE.tex --lean COMPILED.lean [--cache DIR --module PREFIX]`
   updates the article's pin in `COMPILED.lean` and writes the lexing cache: one
   module per section, named after its content, with the certificates of its
@@ -17,6 +23,7 @@ open Proofread
 
 def usage : String :=
   "usage: proofread check ARTICLE.tex [--vocab core|unitsquare] [--prose] [--claims]\n" ++
+  "       proofread init ARTICLE.tex [--name NAME] [--vocab core|unitsquare]\n" ++
   "       proofread prepare ARTICLE.tex --lean COMPILED.lean [--cache DIR --module PREFIX]"
 
 def optArg (opts : List String) (flag : String) : Option String :=
@@ -93,6 +100,169 @@ def prepare (path : System.FilePath) (opts : List String) : IO UInt32 := do
     pure 0
   | _, _ => pure 0
 
+/-- A dotted Lean module name. -/
+def validModule (n : String) : Bool :=
+  !n.isEmpty && (n.splitOn ".").all fun c =>
+    match c.toList with
+    | h :: t => (h.isAlpha || h == '_') && t.all (fun x => x.isAlphanum || x == '_')
+    | [] => false
+
+/-- Text for a Lean comment (no comment delimiters inside). -/
+def commentSafe (s : String) : String := (s.replace "-/" "- /").replace "/-" "/ -"
+
+/-- Write a file unless it exists. -/
+def writeNew (file : System.FilePath) (contents : String) : IO Unit := do
+  if ← file.pathExists then IO.println s!"kept {file} (it exists)"
+  else
+    IO.FS.writeFile file contents
+    IO.println s!"wrote {file}"
+
+def initArticle (path : System.FilePath) (opts : List String) : IO UInt32 := do
+  let unitSquare := optArg opts "--vocab" == some "unitsquare"
+  let V := if unitSquare then UnitSquare.withCore else Vocab.core
+  let dir := path.parent.getD "."
+  let file := (path.fileName.getD "article.tex")
+  let some ns := (optArg opts "--name").orElse (fun _ => dir.normalize.fileName)
+    | IO.eprintln "proofread init: give the namespace with --name NAME"; pure 2
+  unless validModule ns do
+    IO.eprintln s!"proofread init: {ns} is not a Lean module name; give one with --name NAME"
+    return 2
+  let contents ← IO.FS.readFile path
+  let lines ← readLines path
+  let some d := compileArticle V lines
+    | IO.eprintln s!"{path}: error: the article could not be read (no \\begin\{document}, or unbalanced math)"; pure 1
+  let pin := sourcePin contents
+  let cs := V.constNames.map Codes.toString
+  let gs := d.globNames
+  -- where the library's source directory is: the folders above the namespace's own
+  let dirParts := (dir.normalize.components.filter (· != "."))
+  let nsParts := ns.splitOn "."
+  let srcDir : Option String :=
+    if dirParts.length ≥ nsParts.length && dirParts.drop (dirParts.length - nsParts.length) == nsParts then
+      let pre := dirParts.take (dirParts.length - nsParts.length)
+      some (if pre.isEmpty then "." else String.intercalate "/" pre)
+    else none
+  let vocabImport := if unitSquare then "import Proofread.Library.UnitSquare\n" else ""
+  let vocabWith := if unitSquare then " with Proofread.UnitSquare.withCore" else ""
+  let modelImport := if unitSquare then "import Proofread.Library.UnitSquareModel\n" else ""
+  let modelWith := if unitSquare then " with Proofread.UnitSquare.model" else ""
+  let compiled := s!"import Proofread.Meta\n{vocabImport}
+/-! # `{file}`, compiled by the kernel
+
+`{ns}.compiled : compileArticle {ns}.vocab {ns}.source = some {ns}.doc` is checked
+by the kernel from the contents of `{file}`. The last string pins those contents:
+after editing the article, run
+
+    lake exe proofread prepare {path} --lean {dir / "Compiled.lean"}
+
+and then `lake build`. -/
+
+set_option maxRecDepth 100000
+set_option maxHeartbeats 0
+
+#proofread_article {ns} \"{file}\" \"{pin}\"{vocabWith}
+"
+  let article := s!"import {ns}.Compiled
+import Proofread.Readable
+{modelImport}
+/-! # The definitions and claims of `{file}` as Lean
+
+For every definition, a Lean definition with the symbol's name, and for every
+claim `K`: `claimK` (what the sentence says), `meaningfulK` (every term in it is
+defined) and `obligationK` (its premises imply both). Each is tied to the
+compiled document by a kernel-checked `rfl` theorem. -/
+
+set_option maxRecDepth 100000
+set_option maxHeartbeats 0
+
+#proofread_semantics {ns} \"{file}\"{modelWith}
+"
+  let defStubs := (List.range d.values.length).map fun i =>
+    let sym := gs.getD i ""
+    let what := if sym == defName d i || sym.isEmpty then s!"`{defName d i}`" else s!"`{defName d i}` (`{sym}`)"
+    s!"/-- Definition {i}: {what} is well defined. -/
+theorem defined{i} : wellDefined{i} := by
+  unfold wellDefined{i}
+  definedness []
+"
+  let claimStubs := (List.range d.claims.length).map fun k =>
+    let c := d.claims[k]!
+    let (ctx, a, _) := (d.sentences[c.sent]?).getD default
+    let (l, _) := lineCol lines a
+    let place := match ctx.kind with
+      | .result n => s!"{Codes.toString n} at line {l}"
+      | .proof => s!"proof at line {l}"
+      | .text => s!"line {l}"
+    let ps := if c.premises.isEmpty then "no premises"
+      else "premises: " ++ String.intercalate ", " (c.premises.map fun j => s!"claim {j}")
+    s!"/-- Claim {k}, {roleString c.role} ({place}; {ps}):
+`{commentSafe (c.body.tex cs gs [])}` -/
+theorem proof{k} : obligation{k} := by
+  intro_premises
+  refine ⟨by unfold meaningful{k}; definedness [], ?_⟩
+  sorry
+"
+  let stubs := String.intercalate "\n" (defStubs ++ claimStubs)
+  let proofs := s!"import {ns}.Article
+
+/-! # Proofs of the definitions and claims of `{file}`
+
+* `definedI : wellDefinedI`: definition `I` makes sense (no division by zero, every
+  argument in its domain). `definedness [h₁, …]` proves most of these; give it the
+  facts it cannot find.
+* `proofK : obligationK`: claim `K` holds. `intro_premises` introduces
+  `cJ : claimJ` for each premise `J` (in a proof, the earlier steps and the cited
+  results). A claim the text derives (a proof step, or a result with a compiled
+  proof) may use only its premises, Mathlib and the article: `#proofread_certify`
+  audits this.
+* `refuteK : meaningfulK ∧ ¬ claimK` instead records that claim `K` is false as
+  stated; readers and the PDF margin then mark it.
+
+A proof that still uses `sorry` leaves its claim unverified, and `lake build`
+certifies the others. -/
+
+namespace {ns}.Proofs
+open {ns}
+
+{stubs}
+end {ns}.Proofs
+"
+  let reportJson := (System.FilePath.mk file).withExtension "proofread.json"
+  let reportTex := (System.FilePath.mk file).withExtension "proofread.tex"
+  let certified := s!"import {ns}.Proofs
+import Proofread.Certify
+
+/-! # The certified article
+
+The kernel checks `{ns}.certificate`: every verified claim of `{file}` holds and
+every definition is well defined. `{ns}.verifiedK : meaningfulK ∧ claimK` is then
+claim `K`, as stated in the text. The command also writes
+`{reportJson}` (for the reader and the diagnostics) and `{reportTex}` (for the
+margin marks of `proofread.sty`). -/
+
+#proofread_certify {ns} \"{file}\" using {ns}.Proofs
+"
+  writeNew (dir / "Compiled.lean") compiled
+  writeNew (dir / "Article.lean") article
+  writeNew (dir / "Proofs.lean") proofs
+  writeNew (dir / "Certified.lean") certified
+  let root := nsParts.headD ns
+  IO.println s!"\n{d.values.length} definitions and {d.claims.length} claims."
+  match srcDir with
+  | some src =>
+    IO.println s!"Add the library to lakefile.toml (once):
+
+[[lean_lib]]
+name = \"{root}\"
+srcDir = \"{src}\"
+globs = [\"{root}.+\"]
+
+then build the certificate with `lake build {ns}.Certified`."
+  | none =>
+    let want := String.intercalate "/" nsParts
+    IO.println s!"The files of namespace {ns} must lie in a folder path that ends in {want}: move them, or choose --name to match {dir}."
+  pure 0
+
 def main (args : List String) : IO UInt32 := do
   match args with
   | "check" :: path :: opts =>
@@ -102,4 +272,5 @@ def main (args : List String) : IO UInt32 := do
     let failed ← checkArticle vocab path (opts.contains "--prose") (opts.contains "--claims")
     pure (if failed == 0 then 0 else 1)
   | "prepare" :: path :: opts => prepare path opts
+  | "init" :: path :: opts => initArticle path opts
   | _ => IO.eprintln usage; pure 2

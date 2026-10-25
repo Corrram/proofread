@@ -28,3 +28,16 @@ root = "ProofreadCli"
 name = "Squares"
 srcDir = "examples"
 globs = ["Squares.+"]
+
+[[lean_lib]]
+# The demonstration article of docs/getting-started.md.
+name = "Demo"
+srcDir = "examples"
+globs = ["Demo.+"]
+
+[[lean_lib]]
+# The demonstration article with a false theorem, refuted in Lean (a test of the
+# `refuted` status and of claims that cite it).
+name = "Refuted"
+srcDir = "tests"
+globs = ["Refuted.+"]

@@ -71,8 +71,9 @@ def resultKind : EnvKind → String
   | .proof => "proofs"
   | .text => "text"
 
-/-- Diagnostics for a compiled document. `prose` also lists sentences of results
-and proofs without a reading; `claims` prints the reading of every claim. -/
+/-- Diagnostics for a compiled document: sentences that did not compile, and
+sentences of results without a reading. `prose` also lists the sentences of proofs
+without a reading; `claims` prints the reading of every claim. -/
 def diagnostics (V : Vocab) (rel : String) (lines : List (List Nat)) (d : Doc)
     (prose claims : Bool) : List String × Coverage := Id.run do
   let mut out : List String := []
@@ -87,11 +88,15 @@ def diagnostics (V : Vocab) (rel : String) (lines : List (List Nat)) (d : Doc)
     match o with
     | .failed e => out := out ++ [s!"{rel}:{l}:{c}: warning: sentence not compiled ({errMessage e}); it asserts nothing checked"]
     | .prose =>
-      if prose && ctx.kind != .text then
+      -- a sentence of a statement without a reading leaves the statement partly
+      -- unchecked: always a warning; prose in proofs only with `--prose`
+      let inResult := match ctx.kind with | .result _ => true | _ => false
+      if inResult || (prose && ctx.kind != .text) then
         let (_, a, b) := d.sentences[s]!
         let text := Codes.toString ((joinLines lines).drop a |>.take (min 90 (b - a)))
         let text := text.replace "\n" " "
-        out := out ++ [s!"{rel}:{l}:{c}: info: {kindString ctx.kind} sentence without a mathematical reading: {text}"]
+        let severity := if inResult then "warning" else "info"
+        out := out ++ [s!"{rel}:{l}:{c}: {severity}: {kindString ctx.kind} sentence without a mathematical reading: {text}"]
     | .compiled ds ks =>
       if claims then
         for i in ds do

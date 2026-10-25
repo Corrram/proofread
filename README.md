@@ -54,44 +54,36 @@ and its README the coverage: which sentences compiled, and which are still prose
 
 ## Use
 
-Add the package to `lakefile.toml`:
+[Getting started](docs/getting-started.md) takes a one-page note from a first
+draft with four mistakes to a certificate, step by step:
+
+```sh
+lake exe proofread check Note/article.tex --claims   # undefined symbols, unread statements, the reading of every claim
+lake exe proofread init Note/article.tex             # the Lean files, with a stub proof of every claim
+lake build Note.Certified                            # the kernel checks the article and your proofs
+```
+
+The project needs Proofread in its `lakefile.toml`:
 
 ```toml
 [[require]]
 name = "proofread"
 git = "https://github.com/Corrram/proofread.git"
-rev = "<commit>"
+rev = "main"
 ```
 
-Then, next to `article.tex`:
+`proofread init` writes four files next to the article:
 
-```lean
--- Compiled.lean: the kernel compiles the article
-import Proofread.Meta
-import Proofread.Library.UnitSquare
-def vocab : Proofread.Vocab := .core ++ Proofread.UnitSquare.vocab
-#proofread_article Foo "article.tex" "fnv1a64:…" with vocab
+| File | Contents |
+| --- | --- |
+| `Compiled.lean` | `#proofread_article Note "article.tex" "fnv1a64:…"`: the kernel compiles the article, pinned by its hash (`proofread prepare` updates the pin after an edit) |
+| `Article.lean` | `#proofread_semantics`: every definition and claim as readable Lean (`claimK`, `meaningfulK`, `obligationK`) |
+| `Proofs.lean` | your proofs `proofK : obligationK` and `definedI : wellDefinedI`, or `refuteK : meaningfulK ∧ ¬ claimK` for a claim that is false as stated |
+| `Certified.lean` | `#proofread_certify`: the certificate `Note.certificate`, each verified claim `Note.verifiedK`, and the reports |
 
--- Article.lean: every definition and claim as readable Lean
-import Proofread.Readable
-import Proofread.Library.UnitSquareModel
-#proofread_semantics Foo "article.tex" with Proofread.UnitSquare.model
-
--- Proofs.lean: your proofs `proofK : Foo.obligationK`, `definedI : Foo.wellDefinedI`
-
--- Certified.lean: the certificate, `Foo.verifiedK`, and the reports
-import Proofread.Certify
-#proofread_certify Foo "article.tex" using Proofs
-```
-
-[`examples/Squares`](examples/Squares) is the smallest complete example: a
-one-page article (`article.tex`), the four Lean files above, and the reports
-the certificate writes. `lake build Squares` checks it.
-
-While writing, `lake exe proofread check article.tex --vocab unitsquare
---claims` compiles the article natively in about a second and prints each
-undefined symbol, each sentence that does not compile, and the formal reading
-of every claim. `editors/vscode/tasks.json` shows the findings in the editor.
+A proof that still uses `sorry` leaves its claim unverified, so an article can
+be certified while its proofs are written. Claims about copulas and the unit
+square need `--vocab unitsquare` ([Vocabularies and models](docs/vocabularies.md)).
 
 The same source gives the two readable outputs:
 
@@ -102,8 +94,15 @@ The same source gives the two readable outputs:
   article from its source with the status of every sentence and, for each
   claim, its formal reading, Lean statement, premises and justification.
 
+[`examples/Demo`](examples/Demo) is the note of the guide (`draft.tex` and the
+certified `article.tex`), [`tests/Refuted`](tests/Refuted) the same note with
+its theorem refuted, and [`examples/Squares`](examples/Squares) the smallest
+complete example.
+
 ## Documentation
 
+* [Getting started](docs/getting-started.md): set up a project, check an
+  article while writing, prove its claims, read the certificate.
 * [Writing for Proofread](docs/writing.md): the house style and the
   constructions of the grammar, with examples.
 * [From the `.tex` file to the certificate](docs/pipeline.md): the stages,
@@ -123,7 +122,8 @@ The same source gives the two readable outputs:
 | `Proofread/Syntax.lean`, `Denote.lean` | The core language and its Lean denotation |
 | `Proofread/Vocab.lean`, `Library/` | Vocabularies, `phrase!`, the unit-square vocabulary and its model |
 | `Proofread/Meta.lean`, `Readable.lean`, `Certify.lean` | The commands `#proofread_article`, `#proofread_semantics`, `#proofread_certify` |
-| `Proofread/Check.lean`, `ProofreadCli.lean` | The native checker `lake exe proofread` |
+| `Proofread/Check.lean`, `ProofreadCli.lean` | The command line `lake exe proofread`: `check` (the native checker), `init` (the Lean files of an article), `prepare` (the pin and the lexing cache) |
+| `examples/`, `tests/Refuted` | The example articles of the documentation, certified in CI |
 | `reader/` | The web reader: the article rendered from its source with the status of every sentence |
 | `tex/proofread.sty` | Optional margin marks in the PDF (`\usepackage[status]{proofread}`) |
 | `scripts/proofread_diagnostics.py` | Findings from the certificate report, for editors and CI |
