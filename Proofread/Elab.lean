@@ -174,6 +174,21 @@ def interval (lo hi : Tm) (x : Tm) : Tm := .and (.le lo x) (.le x hi)
 def intervalTm (lo hi : Tm) (lopen ropen : Bool) (x : Tm) : Tm :=
   .and (if lopen then .lt lo x else .le lo x) (if ropen then .lt x hi else .le x hi)
 
+/-- `\infty` as the upper end of an interval, `-\infty` as its lower end. -/
+def isInfty (upper : Bool) : MT → Bool
+  | .id n => upper && n == w!"\\infty"
+  | .neg (.id n) => !upper && n == w!"\\infty"
+  | _ => false
+
+/-- Membership in an interval whose ends may be infinite (`(0,\infty)`): an
+infinite end, `none`, imposes no condition. -/
+def rayTm (lo hi : Option Tm) (lopen ropen : Bool) (x : Tm) : Tm :=
+  match lo, hi with
+  | some l, some h => intervalTm l h lopen ropen x
+  | some l, none => if lopen then .lt l x else .le l x
+  | none, some h => if ropen then .lt x h else .le x h
+  | none, none => .tt
+
 /-- The key of a symbol: `x`, or a constant with a subscript (`d_0`, `g_*`,
 `\Delta_0`), whose key is the whole symbol. -/
 def symKey : MT → Option Codes
@@ -365,6 +380,14 @@ def constMT : MT → Option Tm
   | .neg x => (constMT x).map .neg
   | .frac x y | .div x y => do some (.div (← constMT x) (← constMT y))
   | _ => none
+
+/-- A closed end of an interval domain; `none` for an infinite end, which must be
+open (`[0,\infty)`, not `[0,\infty]`). -/
+def constEnd (upper isOpen : Bool) (m : MT) : M (Option Tm) :=
+  if isInfty upper m then (if isOpen then pure none else fail E.unsupported)
+  else match constMT m with
+    | some t => pure (some t)
+    | none => fail E.unsupported
 
 /-- The point-free subject: a term substituted for unapplied functions on its type. -/
 abbrev PF := Option (Tm × Ty)
@@ -712,14 +735,18 @@ where
           let h ← asReal (← term g sc none hi)
           pure (interval l h (← asReal x))
       | .ival lo hi lopen ropen => do
-        let l ← asReal (← term g sc none lo)
-        let h ← asReal (← term g sc none hi)
-        pure (intervalTm l h lopen ropen (← asReal x))
+        let l ← if isInfty false lo then (if lopen then pure none else fail E.unsupported)
+          else do let t ← term g sc none lo; pure (some (← asReal t))
+        let h ← if isInfty true hi then (if ropen then pure none else fail E.unsupported)
+          else do let t ← term g sc none hi; pure (some (← asReal t))
+        pure (rayTm l h lopen ropen (← asReal x))
       | .tuple [lo, hi] => do
-        -- `x ∈ (a,b)`: an open interval
-        let l ← asReal (← term g sc none lo)
-        let h ← asReal (← term g sc none hi)
-        pure (intervalTm l h true true (← asReal x))
+        -- `x ∈ (a,b)`: an open interval, `x ∈ (0,\infty)` a ray
+        let l ← if isInfty false lo then pure none
+          else do let t ← term g sc none lo; pure (some (← asReal t))
+        let h ← if isInfty true hi then pure none
+          else do let t ← term g sc none hi; pure (some (← asReal t))
+        pure (rayTm l h true true (← asReal x))
       | .id n => do
         if n == w!"\\mathbb{R}" then do let _ ← asReal x; pure .tt else
         let (i, gl) ← liftO (← lookupGlob n) E.undefined n
@@ -761,13 +788,13 @@ where
         | .interval (.neg (.num a)) (.num b) => pure (.real, some (interval (.neg (.num a)) (.num b) (.loc 0)))
         | .interval (.num a) (.num b) => pure (.real, some (interval (.num a) (.num b) (.loc 0)))
         | .ival a b lo ro => do
-          let some a' := constMT a | fail E.unsupported
-          let some b' := constMT b | fail E.unsupported
-          pure (.real, some (intervalTm a' b' lo ro (.loc 0)))
+          let a' ← constEnd false lo a
+          let b' ← constEnd true ro b
+          pure (.real, some (rayTm a' b' lo ro (.loc 0)))
         | .tuple [a, b] => do
-          let some a' := constMT a | fail E.unsupported
-          let some b' := constMT b | fail E.unsupported
-          pure (.real, some (intervalTm a' b' true true (.loc 0)))
+          let a' ← constEnd false true a
+          let b' ← constEnd true true b
+          pure (.real, some (rayTm a' b' true true (.loc 0)))
         | _ => fail E.unsupported
 
 /-- Elaborate a lambda `pat ↦ body` with the given argument types and result type. -/

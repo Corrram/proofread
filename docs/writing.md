@@ -72,6 +72,7 @@ rho and Gini's gamma* (arXiv:2609.19890), compiled in `lean-verifications`
 | class | `let $\CC$ denote the class of bivariate copulas, that is, distribution functions on $[0,1]^2$ with uniform marginals.` |
 | quantity of an object | `For a copula $C$, the population version of Blest's rank correlation is \begin{equation}\nu(C)\coloneqq…\end{equation}` |
 | several quantities | `For a copula $C$, the transpose of $C$ is $C^\top(u,v)\coloneqq C(v,u)$, and the survival copula of $C$ is …` |
+| map on a ray | `Define $f:(0,\infty)\to\mathbb{R}$ by $f(x)\coloneqq x+\frac1x$.` (an interval may have an infinite end: `(0,\infty)`, `[1,\infty)`, `(-\infty,0]`. Its domain makes `\frac1x` well defined) |
 | map with signature | `define $\Phi:[-1,1]\to[-1,1]$ by \[…\]` (a `cases` display is a piecewise definition; a piece may follow as `on $(-1,-\frac34)$, parametrically by \[…\]`) |
 | definition with an observation | `… and observe that $2r-\Phi(r)=-\Phi(-r)$ for every $r\in[-1,1]$.` (the observation is a claim) |
 | family | `For $c\in[0,1]$, let $D_c$ denote the copula associated with $\gamma_{\zeta_c}$ from Section~\ref{sec:preliminaries}.` |
@@ -89,7 +90,7 @@ rho and Gini's gamma* (arXiv:2609.19890), compiled in `lean-verifications`
 | an implicit parameter | `For $b\in(0,\frac12]$, set \begin{equation}z_-(x)\coloneqq\frac{x+b-1}{2(1-b)},\qquad z_+(x)\coloneqq\frac{1-b-(1-2b)x}{2(1-b)}.\end{equation}` |
 | value and derivative | `define continuous functions $\varphi_w,\psi_w:[0,1]\to\R$ by $\varphi_w(1-w)=0$, $\psi_w(0)=0$, and DISPLAY` with `\varphi_w'(x)=\begin{cases}…\end{cases}` in the display, or `Let $\varphi_b,\psi_b:[0,1]\to\R$ be continuous, normalized by $\varphi_b(1-b)=0$ and $\psi_b(0)=0$, with derivatives DISPLAY` (read as `φ(x) = φ(a) + ∫_a^x φ'`; the derivative may be given on open pieces) |
 | a set of pairs | `For $w\in[\frac12,1)$, the support of $\gamma_{T_w}$ is \[S_w\coloneqq\{(x,1-x):0\le x\le1-w\}\cup\{(x,x+w-1):1-w\le x\le1\}.\]` (unions `\cup`, products `[a,b]\times\{c\}`) |
-| the variable of a result | `Let $w\in[\frac12,1)$.` |
+| the variable of a result or a proof | `Let $w\in[\frac12,1)$.` (in a proof, `Let $x\in(0,\infty)$. Then $\frac{(x-1)^2}{x}\ge0$.` binds `x` in the later steps of the proof) |
 | law of a construction | `For a Borel measurable $T:[0,1]\to[0,1]$, let $\gamma_T$ denote the law of $(X,T(X))$ for $X$ uniformly distributed on $[0,1]$.` |
 
 ## Claims
@@ -118,7 +119,7 @@ citations.
 | an inequality on a square | `Then every $(x,z)\in[0,1]^2$ satisfies \begin{equation}\varphi_w(x)+\psi_w(z)\ge d_{\kappa_w}(x,z).\end{equation}` |
 | sharpness | `Both constants are sharp.` (after a claim `a\le c` about every element of a domain: for every `ε > 0` some element has `c - a < ε`) |
 | shape | `Moreover, $\Om$ is compact, convex and centrally symmetric, and $\rhoup$ is continuous, concave and strictly increasing.` (a function on the domain its definition states) |
-| equality sets | `If $w>\frac12$, equality holds exactly on $S_w$, and if $w=\frac12$, it holds exactly on $S_{1/2}\cup([\frac12,1]\times\{\frac12\})$.`, `…, and equality holds exactly when $x=R_b(z)$.` (about the preceding inequality, for every point of its domain) |
+| equality sets | `If $w>\frac12$, equality holds exactly on $S_w$, and if $w=\frac12$, it holds exactly on $S_{1/2}\cup([\frac12,1]\times\{\frac12\})$.`, `…, and equality holds exactly when $x=R_b(z)$.`, `For every $x\in(0,\infty)$, $f(x)\ge2$. Equality holds exactly when $x=1$.` (about the preceding inequality, for every point of its domain) |
 
 The readings are fixed and documented next to each construction in
 `Proofread/Grammar.lean` (parsing) and `Proofread/Doc.lean` (meaning). Run
@@ -137,10 +138,15 @@ rectangle.") are prose and assert nothing.
 ## Checking while writing
 
 ```sh
-lake exe proofread check article.tex --vocab unitsquare            # undefined symbols, failed sentences
-lake exe proofread check article.tex --vocab unitsquare --claims   # and the reading of every claim
-lake exe proofread check article.tex --vocab unitsquare --prose    # and the prose inside results and proofs
+lake exe proofread check article.tex            # undefined symbols, failed sentences, unread statements
+lake exe proofread check article.tex --claims   # and the reading of every claim
+lake exe proofread check article.tex --prose    # and the prose inside proofs
 ```
+
+Add `--vocab unitsquare` for articles about copulas and the unit square
+([Vocabularies and models](vocabularies.md)). A sentence of a theorem, lemma or
+corollary that the grammar does not read is a warning: that part of the
+statement would not be checked.
 
 The check takes about a second and certifies nothing. `lake build` of the
 certifying module checks everything in the kernel. `editors/vscode/tasks.json`

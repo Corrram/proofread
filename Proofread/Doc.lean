@@ -125,13 +125,15 @@ def domainOf (calculus : Bool) (d : MT) : M (Ty × Option Tm) := do
       let h ← closedBound hi
       pure (.real, some (intervalPred l h))
     | .ival lo hi lopen ropen => do
-      let l ← closedBound lo
-      let h ← closedBound hi
-      pure (.real, some (.lam .real .tt (Elab.intervalTm l h lopen ropen (.loc 0))))
+      let l ← if Elab.isInfty false lo then (if lopen then pure none else fail E.unsupported)
+        else some <$> closedBound lo
+      let h ← if Elab.isInfty true hi then (if ropen then pure none else fail E.unsupported)
+        else some <$> closedBound hi
+      pure (.real, some (.lam .real .tt (Elab.rayTm l h lopen ropen (.loc 0))))
     | .tuple [lo, hi] => do
-      let l ← liftO (Elab.constMT lo) E.unsupported
-      let h ← liftO (Elab.constMT hi) E.unsupported
-      pure (.real, some (.lam .real .tt (Elab.intervalTm l h true true (.loc 0))))
+      let l ← Elab.constEnd false true lo
+      let h ← Elab.constEnd true true hi
+      pure (.real, some (.lam .real .tt (Elab.rayTm l h true true (.loc 0))))
     | .id n => do
       -- the real numbers
       if n == w!"\\mathbb{R}" then pure (.real, none) else
@@ -1233,10 +1235,12 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
       | _ => fail E.free free.flatten
     | _ => pure none
   -- variables bound by the opening binders of the current result carry over to
-  -- its later sentences (`For $w\in[0,1]$, … . In particular, … w …`)
+  -- its later sentences (`For $w\in[0,1]$, … . In particular, … w …`), and a
+  -- variable introduced in a proof (`Let $x\in A$.`) to the proof's later steps
   let st ← get
   let inResult := match c.ctx.kind with | .result _ => true | _ => false
-  let inherited ← if inResult && !st.envBinders.isEmpty then do
+  let inScope := match c.ctx.kind with | .result _ | .proof => true | _ => false
+  let inherited ← if inScope && !st.envBinders.isEmpty then do
       let known := (scopeOf (bs ++ onVar.toList)).map (·.1)
       let clBound := cls.flatMap fun cl => (cl.binds.flatMap fun b => match b with
         | .every vs _ => vs | _ => []) ++ (match cl.clause with
@@ -1290,11 +1294,21 @@ def claimSentence (c : SentCtx) (topic : Topic) (binds : List Bind) (cls : List 
         -- a clause with its own binder is not in the scope of the sentence's opening
         -- binders; inherited binders bind the variables the clause uses
         let own := match k with | .scoped _ vs _ _ | .every vs _ _ => vs | _ => []
+        -- `equality holds …` binds the variables of the inequality it refers to
+        let stNow ← get
+        let own := own ++ (if usesIneq k then ((stNow.lastIneq.map (·.1.map (·.name))).getD []) else [])
         let free := (clauseMaths k).flatMap (freeIds 64 ((scopeOf (bs ++ cbs)).map (·.1) ++ own)) ++
           ineqFree (← get) k
         let inh := inherited.filter fun b => free.contains b.name
         let outer := if cbs.isEmpty then inh ++ bs ++ onVar.toList else inh
         let p ← clauseTm c (scopeOf cbs ++ scopeOf outer) onVar last k
+        -- an inequality about the bound variables is the referent of a later
+        -- `equality holds exactly when …`
+        match k with
+        | .fact f | .holds f | .scoped f [] none _ =>
+          if !(outer ++ cbs).isEmpty && (inequality f).isSome then
+            modify fun st => { st with lastIneq := some (outer ++ cbs, f) }
+        | _ => pure ()
         let id ← emit c (wrap (outer ++ cbs) p) cl.cites
         let ids ← go g rest (match rhsOf k with | some r => some r | none => last)
         pure (id :: ids)
