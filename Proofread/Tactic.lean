@@ -2,6 +2,7 @@ import Lean
 import Mathlib.Tactic.NormNum
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.CasesM
+import Mathlib.Tactic.Tauto
 
 /-! # Tactics for writing justifications of compiled claims -/
 namespace Proofread
@@ -37,7 +38,8 @@ elab "intro_premises" : tactic => do
 
 /-- `definedness [t₁, …]` proves a definedness condition (`meaningfulK`, `wellDefinedI`):
 a tree of `∧`, `→` and `∀` whose leaves are hypotheses, numeric side conditions
-or the given facts. -/
+or the given facts, and whose impossible branches (contradictory case
+conditions) are closed by `linarith` or `tauto`. -/
 elab "definedness" " [" ts:term,* "]" : tactic => do
   let leaf ← ts.getElems.foldlM (fun acc t => do
     let accS ← `(Lean.Parser.Tactic.tacticSeq| $acc:tactic)
@@ -47,7 +49,12 @@ elab "definedness" " [" ts:term,* "]" : tactic => do
     | (norm_num; done)
     | (intro _; try casesm* _ ∧ _)
     | refine ⟨?_, ?_⟩
-    | (linarith; done))
+    | (linarith; done)
+    -- a branch whose case conditions contradict each other
+    | (exfalso; tauto; done)
+    -- uncovered cases: the negated case conditions contradict the domain
+    | (exfalso; (try simp only [not_and_or, not_le, not_lt, ← ne_eq, ne_iff_lt_or_gt] at *);
+        (casesm* _ ∨ _) <;> linarith))
   let stepS ← `(Lean.Parser.Tactic.tacticSeq| $step:tactic)
   evalTactic (← `(tactic| repeat' $stepS))
 

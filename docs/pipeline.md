@@ -40,7 +40,7 @@ The kernel's work is split so that an edit is checked where it happened:
   a separate kernel check, and composed by explicit proof terms.
 
 For the Blest article (90 blocks in 5 sections, 349 sentences, 25 definitions
-and 41 claims) the kernel-checked compilation takes about 70 s with the lexing
+and 42 claims) the kernel-checked compilation takes about 70 s with the lexing
 cache and peaks at 2.6 GB, and stating its semantics another 30 s. After an
 edit, the cache modules of the unchanged sections are reused.
 `set_option proofread.timing "file"` records the time of every stage.
@@ -55,6 +55,7 @@ TCCs. A claim means `defined ∧ claim`. The condition includes:
 * points in `[0,1]`, and arguments in the domain a definition states;
 * integrability of integrands and measurability of measured sets;
 * coverage of `cases`, and agreement where two conditions overlap;
+* the body of a map `v ↦ e` at the points of the domain it is used on;
 * exactly one solution of a definite description ("the $b$ with $e_b=e$").
 
 So `1/0 = 0` cannot make a claim true for a conventional reason.

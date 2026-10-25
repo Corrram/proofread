@@ -333,6 +333,12 @@ def pfDomain : Nat → MT → M (Option (Ty × Option Tm))
 
 def holdsAt (p : Option Tm) (x : Tm) : Tm := match p with | some p => .app p x | none => .tt
 
+/-- A map `v ↦ body` used only on the points of a domain: its definedness
+condition asks for the body only there. -/
+def onDomain (p : Option Tm) : Tm → Tm
+  | .lam t _ b => .lam t (holdsAt p (.loc 0)) b
+  | t => t
+
 /-- Resolve a relation object: a formula, or a named object (possibly introduced here). -/
 def object (sc : Scope) (ty : Ty) : Obj → M Tm
   | .math (.mapsto pat body) => do
@@ -844,6 +850,7 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
     let (bty, bpred) ← domainOf false b
     if bty != .real then fail E.unsupported
     let (fn, _) ← Elab.lam F sc pat [aty] (some .real) body
+    let fn := onDomain apred fn
     let fx : Tm := .app (shift 1 0 fn) (.loc 0)
     let into := Tm.all aty (Tm.mkImp (holdsAt apred (.loc 0)) (holdsAt bpred fx))
     let fxx : Tm := .app (shift 2 0 fn) (.loc 1)
@@ -932,6 +939,7 @@ def clauseTm (c : SentCtx) (sc : Scope) (onVar : Option BindInfo) (lastRhs : Opt
       | .mapsto (.id v) body => do
         let some b := (← get).envBinders.find? (·.name == v) | fail E.free v
         let (fn, _) ← Elab.lam F sc (.id v) [b.ty] (some .real) body
+        let fn := onDomain b.pred fn
         let fxx : Tm := .app (shift 2 0 fn) (.loc 1)
         let fyy : Tm := .app (shift 2 0 fn) (.loc 0)
         let ltA : Tm := if b.ty == .unit then .lt (.ofUnit (.loc 1)) (.ofUnit (.loc 0)) else .lt (.loc 1) (.loc 0)
@@ -949,6 +957,7 @@ def rangesTm (sc : Scope) (k : Nat) (bind : BindInfo) (target : MT) : M Tm := do
   let some (v, body) := (← get).lastMaps[k]? | fail E.referent
   if v != bind.name then fail E.referent v
   let (fn, _) ← Elab.lam F sc (.id v) [bind.ty] (some .real) body
+  let fn := onDomain bind.pred fn
   let fv : Tm := .app (shift 1 0 fn) (.loc 0)
   let inner ← Elab.term.member F ((v, bind.ty) :: sc) (fv, .real) target
   let into := Tm.all bind.ty (Tm.mkImp (holdsAt bind.pred (.loc 0)) inner)
